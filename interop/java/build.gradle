@@ -59,7 +59,7 @@ task buildExamples(type: JavaCompile, dependsOn: classes) {
     
     source = fileTree('src/flow/examples')
     classpath = sourceSets.main.output
-    destinationDir = file('build/examples')
+    destinationDirectory = file('build/examples')
 }
 
 // Task to run the Call Flow example
