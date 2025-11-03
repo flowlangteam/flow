@@ -12,6 +12,7 @@ pub struct Compiler {
     string_data: Vec<DataId>,
     lambda_counter: usize,
     function_ids: HashMap<String, cranelift_module::FuncId>,
+    function_sigs: HashMap<String, (Vec<flow_ast::Type>, Option<flow_ast::Type>)>, // params, return type
 }
 
 #[derive(Debug, Clone)]
@@ -51,6 +52,7 @@ impl Compiler {
             string_data: Vec::new(),
             lambda_counter: 0,
             function_ids: HashMap::new(),
+            function_sigs: HashMap::new(),
         }
     }
 
@@ -148,8 +150,11 @@ impl Compiler {
             .declare_function(&func.name, linkage, &self.ctx.func.signature)
             .map_err(|e| format!("Failed to declare function: {}", e))?;
 
-        // Store the function ID for later retrieval
+        // Store the function ID and signature for later retrieval
         self.function_ids.insert(func.name.clone(), func_id);
+        
+        let param_types = func.params.iter().map(|p| p.ty.clone()).collect();
+        self.function_sigs.insert(func.name.clone(), (param_types, func.return_type.clone()));
 
         Ok(())
     }
@@ -191,6 +196,7 @@ impl Compiler {
             var_index: 0,
             struct_layouts: &self.struct_layouts,
             memory_tracker: Vec::new(),
+            function_sigs: &self.function_sigs,
         };
 
         // Declare parameters as variables
@@ -273,6 +279,7 @@ struct FunctionCompiler<'a> {
     var_index: usize,
     struct_layouts: &'a HashMap<String, StructLayout>,
     memory_tracker: Vec<Value>,
+    function_sigs: &'a HashMap<String, (Vec<flow_ast::Type>, Option<flow_ast::Type>)>,
 }
 
 impl<'a> FunctionCompiler<'a> {
@@ -482,6 +489,21 @@ impl<'a> FunctionCompiler<'a> {
                 match &**right {
                     Expr::Ident(func_name) => {
                         // Simple case: x |> f becomes f(x)
+                        // Get the function signature to ensure proper calling convention
+                        let (param_types, return_type) = self.function_sigs
+                            .get(func_name)
+                            .ok_or_else(|| format!("Function {} signature not found", func_name))?
+                            .clone();
+                        
+                        // Verify the signature matches what we're passing
+                        if param_types.len() != 1 {
+                            return Err(format!(
+                                "Pipe operator requires function with exactly 1 parameter, {} has {}",
+                                func_name,
+                                param_types.len()
+                            ));
+                        }
+                        
                         let func_or_data_id = self.module
                             .get_name(func_name)
                             .ok_or_else(|| format!("Function {} not found", func_name))?;
@@ -497,7 +519,7 @@ impl<'a> FunctionCompiler<'a> {
                         // Get the results properly using the DFG
                         let results = self.builder.func.dfg.inst_results(call_inst);
                         
-                        if results.is_empty() {
+                        if return_type.is_none() || results.is_empty() {
                             Ok(self.builder.ins().iconst(types::I64, 0))
                         } else {
                             Ok(results[0])
