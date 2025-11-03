@@ -452,8 +452,8 @@ impl<'a> FunctionCompiler<'a> {
                         arg_vals.push(self.compile_expr(arg)?);
                     }
                     
-                    let call = self.builder.ins().call(local_func, &arg_vals);
-                    let results = self.builder.inst_results(call);
+                    let call_inst = self.builder.ins().call(local_func, &arg_vals);
+                    let results = self.builder.func.dfg.inst_results(call_inst);
                     
                     if results.is_empty() {
                         Ok(self.builder.ins().iconst(types::I64, 0))
@@ -492,8 +492,10 @@ impl<'a> FunctionCompiler<'a> {
                         };
                         
                         let local_func = self.module.declare_func_in_func(func_id, self.builder.func);
-                        let call = self.builder.ins().call(local_func, &[left_val]);
-                        let results = self.builder.inst_results(call);
+                        let call_inst = self.builder.ins().call(local_func, &[left_val]);
+                        
+                        // Get the results properly using the DFG
+                        let results = self.builder.func.dfg.inst_results(call_inst);
                         
                         if results.is_empty() {
                             Ok(self.builder.ins().iconst(types::I64, 0))
@@ -520,8 +522,8 @@ impl<'a> FunctionCompiler<'a> {
                                 arg_vals.push(self.compile_expr(arg)?);
                             }
                             
-                            let call = self.builder.ins().call(local_func, &arg_vals);
-                            let results = self.builder.inst_results(call);
+                            let call_inst = self.builder.ins().call(local_func, &arg_vals);
+                            let results = self.builder.func.dfg.inst_results(call_inst);
                             
                             if results.is_empty() {
                                 Ok(self.builder.ins().iconst(types::I64, 0))
