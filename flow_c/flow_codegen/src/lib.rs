@@ -127,17 +127,18 @@ impl Compiler {
     }
 
     fn declare_function(&mut self, func: &Function) -> Result<(), String> {
-        self.ctx.func.signature.params.clear();
-        self.ctx.func.signature.returns.clear();
+        // Create a new signature with the ISA's default calling convention
+        let call_conv = self.module.isa().default_call_conv();
+        let mut sig = Signature::new(call_conv);
 
         for param in &func.params {
             let cranelift_type = type_to_cranelift(&param.ty)?;
-            self.ctx.func.signature.params.push(AbiParam::new(cranelift_type));
+            sig.params.push(AbiParam::new(cranelift_type));
         }
 
         if let Some(ref return_type) = func.return_type {
             let cranelift_type = type_to_cranelift(return_type)?;
-            self.ctx.func.signature.returns.push(AbiParam::new(cranelift_type));
+            sig.returns.push(AbiParam::new(cranelift_type));
         }
 
         let linkage = if func.is_pub {
@@ -147,8 +148,11 @@ impl Compiler {
         };
 
         let func_id = self.module
-            .declare_function(&func.name, linkage, &self.ctx.func.signature)
+            .declare_function(&func.name, linkage, &sig)
             .map_err(|e| format!("Failed to declare function: {}", e))?;
+        
+        // Now update the context signature for compilation
+        self.ctx.func.signature = sig;
 
         // Store the function ID and signature for later retrieval
         self.function_ids.insert(func.name.clone(), func_id);
