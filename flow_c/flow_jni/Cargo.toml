@@ -1,0 +1,21 @@
+[package]
+name = "flow_jni"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+flow_codegen = { path = "../flow_codegen" }
+flow_parser = { path = "../flow_parser" }
+flow_lexer = { path = "../flow_lexer" }
+flow_ast = { path = "../flow_ast" }
+cranelift = "0.112"
+cranelift-jit = "0.112"
+cranelift-module = "0.112"
+jni = "0.21"
+libc = "0.2"
+lazy_static = "1.4"
+
+[dev-dependencies]

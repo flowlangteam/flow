@@ -1,0 +1,8 @@
+[package]
+name = "flow_parser"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+flow_ast = { path = "../flow_ast" }
+flow_lexer = { path = "../flow_lexer" }

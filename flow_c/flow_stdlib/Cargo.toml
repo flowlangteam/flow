@@ -1,0 +1,6 @@
+[package]
+name = "flow_stdlib"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

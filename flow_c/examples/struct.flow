@@ -1,0 +1,21 @@
+// Struct and implementation example
+struct Point {
+    pub x: Int,
+    pub y: Int
+}
+
+impl Point {
+    fn new(x: Int, y: Int) -> Point {
+        Point { x: x, y: y }
+    }
+
+    fn distance_from_origin(self) -> Int {
+        // Simplified - would normally use sqrt
+        self.x * self.x + self.y * self.y
+    }
+}
+
+fn main() -> Int {
+    let p = Point::new(3, 4);
+    p.distance_from_origin()
+}

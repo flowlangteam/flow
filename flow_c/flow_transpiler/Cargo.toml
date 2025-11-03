@@ -1,0 +1,13 @@
+[package]
+name = "flow_transpiler"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+flow_ast = { path = "../flow_ast" }
+anyhow = "1.0"
+thiserror = "1.0"
+
+[dev-dependencies]
+flow_parser = { path = "../flow_parser" }
+flow_lexer = { path = "../flow_lexer" }

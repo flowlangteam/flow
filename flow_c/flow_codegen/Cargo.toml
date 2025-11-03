@@ -1,0 +1,12 @@
+[package]
+name = "flow_codegen"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+flow_ast = { path = "../flow_ast" }
+cranelift.workspace = true
+cranelift-jit.workspace = true
+cranelift-module.workspace = true
+cranelift-frontend.workspace = true
+cranelift-native.workspace = true

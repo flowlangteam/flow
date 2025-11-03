@@ -1,0 +1,25 @@
+// Type system showcase
+func process_numbers(a: i32, b: i64, c: f64) -> f64 {
+    let sum_i = a + b;  // Will need type coercion
+    let result = sum_i + c;
+    result
+}
+
+func main() -> i64 {
+    let byte: u8 = 255;
+    let small: i16 = -1000;
+    let normal: i32 = 42;
+    let big: i64 = 9223372036854775807;
+    
+    let float32: f32 = 3.14;
+    let float64: f64 = 2.718281828;
+    
+    let flag: bool = true;
+    let letter: char = 'A';
+    
+    // Mutable variables
+    let mut counter: i32 = 0;
+    counter = counter + 1;
+    
+    big
+}

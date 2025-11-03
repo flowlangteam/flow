@@ -1,0 +1,4 @@
+// Simple arithmetic example
+func main() -> i64 {
+    5 + 3 * 2
+}

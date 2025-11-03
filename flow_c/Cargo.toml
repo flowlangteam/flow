@@ -1,0 +1,41 @@
+[workspace]
+members = [
+    "flow_cli",
+    "flow_lexer",
+    "flow_ast",
+    "flow_parser",
+    "flow_analyzer",
+    "flow_codegen",
+    "flow_runtime",
+    "flow_stdlib",
+    "flow_transpiler",
+    "flow_transpiler/flow_transpiler_java",
+    "flow_jni",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["Flow Team"]
+
+[workspace.dependencies]
+# Cranelift dependencies
+cranelift = "0.112"
+cranelift-jit = "0.112"
+cranelift-module = "0.112"
+cranelift-frontend = "0.112"
+cranelift-native = "0.112"
+
+# CLI dependencies
+clap = { version = "4.5", features = ["derive"] }
+indicatif = "0.17"
+console = "0.15"
+colored = "2.1"
+
+# Lexer dependencies
+logos = "0.14"
+
+# Error reporting
+codespan-reporting = "0.11"
+ariadne = "0.4"

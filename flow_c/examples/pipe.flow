@@ -1,0 +1,12 @@
+// Pipe operator example - data flows left to right
+fn double(x: Int) -> Int {
+    x * 2
+}
+
+fn add_ten(x: Int) -> Int {
+    x + 10
+}
+
+fn main() -> Int {
+    5 |> double |> add_ten
+}

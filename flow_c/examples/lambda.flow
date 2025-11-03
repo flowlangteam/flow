@@ -1,0 +1,5 @@
+// Lambda expressions with new syntax
+func main() -> i64 {
+    let add = lambda[x: i64, y: i64] { x + y };
+    add(10, 5)
+}

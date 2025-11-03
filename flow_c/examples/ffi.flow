@@ -1,0 +1,8 @@
+// FFI example - calling C functions
+extern "C" {
+    fn abs(Int) -> Int;
+}
+
+fn main() -> Int {
+    abs(-42)
+}

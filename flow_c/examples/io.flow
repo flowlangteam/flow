@@ -1,0 +1,15 @@
+// I/O operations using stdlib
+extern "C" {
+    func flow_print_i64(i64);
+    func flow_println(ptr: *u8, len: usize);
+    func flow_read_i64() -> i64;
+}
+
+func main() -> i64 {
+    flow_print_i64(42);
+    
+    let input = flow_read_i64();
+    flow_print_i64(input * 2);
+    
+    0
+}

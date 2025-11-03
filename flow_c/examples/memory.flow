@@ -1,0 +1,11 @@
+// Memory management with temp scope
+func main() -> i64 {
+    temp {
+        let ptr = alloc<i64>;
+        deref ptr = 42;
+        let value = deref ptr;
+        free(ptr);
+        value
+    }
+    // ptr is automatically freed on scope exit
+}

@@ -1,0 +1,12 @@
+// Match expression with pattern matching
+fn classify(n: Int) -> Int {
+    match n {
+        0 => 0,
+        1 => 1,
+        _ => 99
+    }
+}
+
+fn main() -> Int {
+    classify(42)
+}

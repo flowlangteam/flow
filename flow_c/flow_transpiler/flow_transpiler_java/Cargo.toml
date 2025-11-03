@@ -1,0 +1,27 @@
+[package]
+name = "flow_transpiler_java"
+version.workspace = true
+edition.workspace = true
+
+[[example]]
+name = "generate_bytecode"
+path = "examples/generate_bytecode.rs"
+
+[[example]]
+name = "debug_bytecode"
+path = "examples/debug_bytecode.rs"
+
+[[example]]
+name = "run_bytecode"
+path = "examples/run_bytecode.rs"
+
+[dependencies]
+flow_ast = { path = "../../flow_ast" }
+flow_transpiler = { path = ".." }
+anyhow = "1.0"
+thiserror = "1.0"
+byteorder = "1.5"
+
+[dev-dependencies]
+flow_parser = { path = "../../flow_parser" }
+flow_lexer = { path = "../../flow_lexer" }
