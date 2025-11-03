@@ -999,6 +999,44 @@ mod tests {
     }
 
     #[test]
+    fn test_function_call() {
+        // Test regular function call: main() calls double(5)
+        let program = Program {
+            items: vec![
+                Item::Function(Function {
+                    name: "double".to_string(),
+                    params: vec![Param {
+                        name: "x".to_string(),
+                        ty: flow_ast::Type::I64,
+                    }],
+                    return_type: Some(flow_ast::Type::I64),
+                    body: Expr::Binary {
+                        op: BinOp::Mul,
+                        left: Box::new(Expr::Ident("x".to_string())),
+                        right: Box::new(Expr::Integer(2)),
+                    },
+                    is_pub: false,
+                }),
+                Item::Function(Function {
+                    name: "main".to_string(),
+                    params: vec![],
+                    return_type: Some(flow_ast::Type::I64),
+                    body: Expr::Call {
+                        func: Box::new(Expr::Ident("double".to_string())),
+                        args: vec![Expr::Integer(5)],
+                    },
+                    is_pub: true,
+                }),
+            ],
+        };
+
+        let mut compiler = Compiler::new();
+        let code_ptr = compiler.compile(&program).unwrap();
+        let main_fn: fn() -> i64 = unsafe { std::mem::transmute(code_ptr) };
+        assert_eq!(main_fn(), 10);
+    }
+
+    #[test]
     fn test_match_expression() {
         // Test match with integer patterns
         let program = Program {
