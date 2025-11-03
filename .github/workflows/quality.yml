@@ -1,0 +1,153 @@
+name: Code Quality
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+jobs:
+  rustfmt:
+    name: Format Check
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+        components: rustfmt
+
+    - name: Check formatting
+      working-directory: flow_c
+      run: cargo fmt --all -- --check
+
+  clippy:
+    name: Clippy Lints
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+        components: clippy
+
+    - name: Cache Cargo
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry/
+          ~/.cargo/git/
+          flow_c/target/
+        key: ${{ runner.os }}-clippy-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Run clippy
+      working-directory: flow_c
+      run: cargo clippy --workspace --all-targets -- -D warnings
+
+  check:
+    name: Cargo Check
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+
+    - name: Cache Cargo
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry/
+          ~/.cargo/git/
+          flow_c/target/
+        key: ${{ runner.os }}-check-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Check all targets
+      working-directory: flow_c
+      run: cargo check --workspace --all-targets
+
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install cargo-audit
+      run: cargo install cargo-audit
+
+    - name: Run security audit
+      working-directory: flow_c
+      run: cargo audit
+
+  unused-deps:
+    name: Unused Dependencies
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust nightly
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: nightly
+        override: true
+
+    - name: Install cargo-udeps
+      run: cargo install cargo-udeps --locked
+
+    - name: Check for unused dependencies
+      working-directory: flow_c
+      run: cargo +nightly udeps --workspace
+      continue-on-error: true
+
+  doc:
+    name: Documentation
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+
+    - name: Cache Cargo
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry/
+          ~/.cargo/git/
+          flow_c/target/
+        key: ${{ runner.os }}-doc-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Build documentation
+      working-directory: flow_c
+      run: cargo doc --workspace --no-deps --document-private-items
+      env:
+        RUSTDOCFLAGS: "-D warnings"
+
+    - name: Upload docs
+      uses: actions/upload-artifact@v4
+      with:
+        name: documentation
+        path: flow_c/target/doc/
+        retention-days: 7
+
+  typos:
+    name: Spell Check
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Check for typos
+      uses: crate-ci/typos@master
+      continue-on-error: true

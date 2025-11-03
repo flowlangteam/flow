@@ -1,0 +1,105 @@
+plugins {
+    id 'java-library'
+    id 'maven-publish'
+}
+
+group = 'flow.lang'
+version = '0.1.0'
+
+repositories {
+    mavenCentral()
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_11
+    targetCompatibility = JavaVersion.VERSION_11
+}
+
+sourceSets {
+    main {
+        java {
+            srcDirs = ['src']
+        }
+    }
+}
+
+dependencies {
+    // No external dependencies - pure Java
+}
+
+jar {
+    archiveBaseName = 'flow-runtime'
+    archiveVersion = version
+    
+    manifest {
+        attributes(
+            'Implementation-Title': 'Flow Runtime',
+            'Implementation-Version': version,
+            'Implementation-Vendor': 'Flow Language',
+            'Main-Class': 'flow.examples.CallFlowExample'
+        )
+    }
+}
+
+// Task to build the runtime JAR
+task buildRuntime(type: Jar) {
+    group = 'build'
+    description = 'Build the Flow runtime JAR'
+    
+    archiveBaseName = 'flow-runtime'
+    from sourceSets.main.output
+    
+    destinationDirectory = file('lib')
+}
+
+// Task to build example applications
+task buildExamples(type: JavaCompile, dependsOn: classes) {
+    group = 'build'
+    description = 'Build example applications'
+    
+    source = fileTree('src/flow/examples')
+    classpath = sourceSets.main.output
+    destinationDir = file('build/examples')
+}
+
+// Task to run the Call Flow example
+task runCallExample(type: JavaExec, dependsOn: buildExamples) {
+    group = 'application'
+    description = 'Run the CallFlowExample'
+    
+    classpath = sourceSets.main.output + files('build/examples')
+    mainClass = 'flow.examples.CallFlowExample'
+}
+
+// Task to run the Native Flow example
+task runNativeExample(type: JavaExec, dependsOn: buildExamples) {
+    group = 'application'
+    description = 'Run the NativeFlowExample'
+    
+    classpath = sourceSets.main.output + files('build/examples')
+    mainClass = 'flow.examples.NativeFlowExample'
+}
+
+// Default build task
+defaultTasks 'buildRuntime'
+
+publishing {
+    publications {
+        maven(MavenPublication) {
+            from components.java
+            
+            pom {
+                name = 'Flow Runtime'
+                description = 'Runtime library for Flow language Java interop'
+                url = 'https://github.com/flow-lang/flow'
+                
+                licenses {
+                    license {
+                        name = 'MIT License'
+                        url = 'https://opensource.org/licenses/MIT'
+                    }
+                }
+            }
+        }
+    }
+}

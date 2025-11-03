@@ -1,0 +1,230 @@
+name: Build Flow
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-rust:
+    name: Build Rust Components
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: flow
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact: flow
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: flow.exe
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        target: ${{ matrix.target }}
+        override: true
+        profile: minimal
+
+    - name: Cache Cargo
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          flow_c/target/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Build Flow CLI
+      working-directory: flow_c
+      run: cargo build --release -p flow_cli
+
+    - name: Run Tests
+      working-directory: flow_c
+      run: cargo test --release --workspace
+
+    - name: Upload Flow CLI
+      uses: actions/upload-artifact@v4
+      with:
+        name: flow-cli-${{ matrix.os }}
+        path: flow_c/target/release/${{ matrix.artifact }}
+        retention-days: 30
+
+  build-jni:
+    name: Build JNI Library
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        include:
+          - os: ubuntu-latest
+            artifact: libflow_jni.so
+          - os: macos-latest
+            artifact: libflow_jni.dylib
+          - os: windows-latest
+            artifact: flow_jni.dll
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+        profile: minimal
+
+    - name: Cache Cargo
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          flow_c/target/
+        key: ${{ runner.os }}-jni-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Build JNI Library
+      working-directory: flow_c
+      run: cargo build --release -p flow_jni
+
+    - name: Upload JNI Library
+      uses: actions/upload-artifact@v4
+      with:
+        name: flow-jni-${{ matrix.os }}
+        path: flow_c/target/release/${{ matrix.artifact }}
+        retention-days: 30
+
+  build-java-runtime:
+    name: Build Java Runtime
+    runs-on: ubuntu-latest
+    needs: build-jni
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up JDK 11
+      uses: actions/setup-java@v4
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+
+    - name: Setup Gradle
+      uses: gradle/gradle-build-action@v2
+
+    - name: Download JNI Libraries
+      uses: actions/download-artifact@v4
+      with:
+        path: interop/java/lib/
+        pattern: flow-jni-*
+        merge-multiple: true
+
+    - name: Build Java Runtime
+      working-directory: interop/java
+      run: |
+        chmod +x build.sh
+        ./build.sh gradle
+
+    - name: Upload Java Runtime JAR
+      uses: actions/upload-artifact@v4
+      with:
+        name: flow-runtime-jar
+        path: interop/java/lib/flow-runtime.jar
+        retention-days: 30
+
+    - name: Upload Complete Java Interop
+      uses: actions/upload-artifact@v4
+      with:
+        name: flow-java-interop
+        path: |
+          interop/java/lib/
+          interop/java/src/
+          interop/java/build.gradle
+          interop/java/pom.xml
+          interop/java/README.md
+          interop/java/SETUP.md
+        retention-days: 30
+
+  test-transpiler:
+    name: Test Java Transpiler
+    runs-on: ubuntu-latest
+    needs: build-rust
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+
+    - name: Set up JDK 11
+      uses: actions/setup-java@v4
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+
+    - name: Cache Cargo
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry/
+          ~/.cargo/git/
+          flow_c/target/
+        key: ${{ runner.os }}-transpiler-test-${{ hashFiles('**/Cargo.lock') }}
+
+    - name: Download Flow CLI
+      uses: actions/download-artifact@v4
+      with:
+        name: flow-cli-ubuntu-latest
+        path: ./bin/
+
+    - name: Make Flow CLI executable
+      run: chmod +x ./bin/flow
+
+    - name: Test Transpiler
+      working-directory: flow_c
+      run: |
+        cargo test --release -p flow_transpiler_java -- --nocapture
+
+    - name: Create test Flow file
+      run: |
+        cat > test.flow << 'EOF'
+        func add(a: Int, b: Int) -> Int {
+            a + b
+        }
+        func multiply(a: Int, b: Int) -> Int {
+            a * b
+        }
+        EOF
+
+    - name: Transpile to Java bytecode
+      run: ./bin/flow transpile --target java test.flow
+
+    - name: Verify bytecode
+      run: javap -c Test.class
+
+    - name: Upload test artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: transpiler-test-outputs
+        path: |
+          test.flow
+          Test.class
+        retention-days: 7

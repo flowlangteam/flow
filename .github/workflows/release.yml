@@ -1,0 +1,227 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
+      version: ${{ steps.get_version.outputs.version }}
+    steps:
+    - name: Get version from tag
+      id: get_version
+      run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Flow ${{ steps.get_version.outputs.version }}
+        draft: false
+        prerelease: false
+        body: |
+          ## Flow Language Release ${{ steps.get_version.outputs.version }}
+          
+          ### Downloads
+          - **CLI Binaries**: Platform-specific executables
+          - **JNI Libraries**: For Java interop
+          - **Java Runtime**: Complete interop package
+          
+          ### Installation
+          ```bash
+          # Download the appropriate binary for your platform
+          # Make it executable: chmod +x flow
+          # Move to PATH: sudo mv flow /usr/local/bin/
+          ```
+
+  build-release:
+    name: Build Release (${{ matrix.os }})
+    needs: create-release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            cli_artifact: flow
+            jni_artifact: libflow_jni.so
+            archive_name: flow-linux-x64.tar.gz
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            cli_artifact: flow
+            jni_artifact: libflow_jni.dylib
+            archive_name: flow-macos-x64.tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            cli_artifact: flow.exe
+            jni_artifact: flow_jni.dll
+            archive_name: flow-windows-x64.zip
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        target: ${{ matrix.target }}
+        override: true
+        profile: minimal
+
+    - name: Build Flow CLI
+      working-directory: flow_c
+      run: cargo build --release -p flow_cli
+
+    - name: Build JNI Library
+      working-directory: flow_c
+      run: cargo build --release -p flow_jni
+
+    - name: Create release directory
+      run: mkdir -p release/bin release/lib
+
+    - name: Copy CLI binary (Unix)
+      if: matrix.os != 'windows-latest'
+      run: |
+        cp flow_c/target/release/${{ matrix.cli_artifact }} release/bin/
+        chmod +x release/bin/${{ matrix.cli_artifact }}
+
+    - name: Copy CLI binary (Windows)
+      if: matrix.os == 'windows-latest'
+      run: copy flow_c\target\release\${{ matrix.cli_artifact }} release\bin\
+
+    - name: Copy JNI library (Unix)
+      if: matrix.os != 'windows-latest'
+      run: cp flow_c/target/release/${{ matrix.jni_artifact }} release/lib/
+
+    - name: Copy JNI library (Windows)
+      if: matrix.os == 'windows-latest'
+      run: copy flow_c\target\release\${{ matrix.jni_artifact }} release\lib\
+
+    - name: Create README
+      run: |
+        cat > release/README.txt << 'EOF'
+        Flow Language - Release ${{ needs.create-release.outputs.version }}
+        
+        Contents:
+        - bin/flow - Flow CLI compiler and transpiler
+        - lib/${{ matrix.jni_artifact }} - JNI library for Java interop
+        
+        Installation:
+        1. Add bin/flow to your PATH
+        2. For Java interop, copy lib/${{ matrix.jni_artifact }} to your java.library.path
+        
+        Usage:
+          flow run program.flow          # Run Flow code
+          flow transpile --target java program.flow  # Transpile to Java bytecode
+        
+        Documentation: https://github.com/flow-lang/flow
+        EOF
+
+    - name: Create archive (Unix)
+      if: matrix.os != 'windows-latest'
+      run: |
+        cd release
+        tar -czf ../${{ matrix.archive_name }} *
+        cd ..
+
+    - name: Create archive (Windows)
+      if: matrix.os == 'windows-latest'
+      run: |
+        cd release
+        powershell Compress-Archive -Path * -DestinationPath ..\${{ matrix.archive_name }}
+        cd ..
+
+    - name: Upload Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: ./${{ matrix.archive_name }}
+        asset_name: ${{ matrix.archive_name }}
+        asset_content_type: application/octet-stream
+
+  build-java-release:
+    name: Build Java Runtime Release
+    needs: create-release
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up JDK 11
+      uses: actions/setup-java@v4
+      with:
+        java-version: '11'
+        distribution: 'temurin'
+
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        override: true
+
+    - name: Build JNI for all platforms
+      working-directory: flow_c
+      run: |
+        # Build for current platform
+        cargo build --release -p flow_jni
+        
+    - name: Setup Gradle
+      uses: gradle/gradle-build-action@v2
+
+    - name: Copy JNI library
+      run: |
+        mkdir -p interop/java/lib
+        cp flow_c/target/release/libflow_jni.so interop/java/lib/ || true
+        cp flow_c/target/release/libflow_jni.dylib interop/java/lib/ || true
+        cp flow_c/target/release/flow_jni.dll interop/java/lib/ || true
+
+    - name: Build Java Runtime
+      working-directory: interop/java
+      run: |
+        chmod +x build.sh
+        ./build.sh gradle
+
+    - name: Create Java interop package
+      run: |
+        mkdir -p flow-java-interop
+        cp -r interop/java/lib flow-java-interop/
+        cp -r interop/java/src flow-java-interop/
+        cp interop/java/build.gradle flow-java-interop/
+        cp interop/java/pom.xml flow-java-interop/
+        cp interop/java/README.md flow-java-interop/
+        cp interop/java/SETUP.md flow-java-interop/
+        cp interop/java/build.sh flow-java-interop/
+        tar -czf flow-java-interop.tar.gz flow-java-interop
+
+    - name: Upload Java Interop Package
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: ./flow-java-interop.tar.gz
+        asset_name: flow-java-interop-${{ needs.create-release.outputs.version }}.tar.gz
+        asset_content_type: application/gzip
+
+    - name: Upload Runtime JAR
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: ./interop/java/lib/flow-runtime.jar
+        asset_name: flow-runtime-${{ needs.create-release.outputs.version }}.jar
+        asset_content_type: application/java-archive

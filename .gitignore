@@ -1,0 +1,103 @@
+# Rust / Cargo
+target/
+Cargo.lock
+**/*.rs.bk
+*.pdb
+
+# Flow compiled outputs
+*.class
+*.jar
+
+# Java
+*.class
+*.jar
+!interop/java/lib/flow-runtime.jar
+.gradle/
+build/
+.classpath
+.project
+.settings/
+bin/
+*.iml
+.idea/
+
+# Native libraries
+*.so
+*.dylib
+*.dll
+!interop/java/lib/*.so
+!interop/java/lib/*.dylib
+!interop/java/lib/*.dll
+
+# OS specific
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.directory
+
+# IDE
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.sublime-project
+*.sublime-workspace
+.idea/
+*.iml
+
+# Build artifacts
+*.o
+*.a
+*.lib
+*.exe
+!flow_c/target/release/flow
+!flow_c/target/release/flow.exe
+
+# Documentation
+target/doc/
+*.orig
+
+# Test outputs
+*.log
+test_output/
+tmp/
+
+# Coverage
+*.profraw
+*.profdata
+cobertura.xml
+lcov.info
+
+# Package managers
+node_modules/
+package-lock.json
+yarn.lock
+
+# Maven
+pom.xml.tag
+pom.xml.releaseBackup
+pom.xml.versionsBackup
+pom.xml.next
+release.properties
+dependency-reduced-pom.xml
+buildNumber.properties
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.jar
+
+# Gradle
+.gradle
+**/build/
+!src/**/build/
+gradle-app.setting
+!gradle-wrapper.jar
+!gradle-wrapper.properties
+.gradletasknamecache
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
+.cache/
