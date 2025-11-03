@@ -174,18 +174,22 @@ impl Compiler {
         };
 
         self.ctx.func.clear();
-        self.ctx.func.signature.params.clear();
-        self.ctx.func.signature.returns.clear();
+        
+        // Create signature with proper calling convention
+        let call_conv = self.module.isa().default_call_conv();
+        let mut sig = Signature::new(call_conv);
 
         for param in &func.params {
             let cranelift_type = type_to_cranelift(&param.ty)?;
-            self.ctx.func.signature.params.push(AbiParam::new(cranelift_type));
+            sig.params.push(AbiParam::new(cranelift_type));
         }
 
         if let Some(ref return_type) = func.return_type {
             let cranelift_type = type_to_cranelift(return_type)?;
-            self.ctx.func.signature.returns.push(AbiParam::new(cranelift_type));
+            sig.returns.push(AbiParam::new(cranelift_type));
         }
+        
+        self.ctx.func.signature = sig;
 
         let mut builder = FunctionBuilder::new(&mut self.ctx.func, &mut self.builder_context);
         let entry_block = builder.create_block();
