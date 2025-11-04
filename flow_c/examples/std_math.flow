@@ -1,0 +1,17 @@
+as std::math;
+
+pub func add(x: i64, y: i64) -> i64 {
+    x + y
+}
+
+pub func subtract(x: i64, y: i64) -> i64 {
+    x - y
+}
+
+pub func multiply(x: i64, y: i64) -> i64 {
+    x * y
+}
+
+pub func divide(x: i64, y: i64) -> i64 {
+    x / y
+}

@@ -40,6 +40,8 @@ pub enum Token {
     From,
     #[token("as")]
     As,
+    #[token("use")]
+    Use,
     #[token("pub")]
     Pub,
     #[token("self")]
@@ -246,5 +248,40 @@ mod tests {
         assert_eq!(tokens[1], Token::LBracket);
         assert_eq!(tokens[2], Token::Ident("x".to_string()));
         assert_eq!(tokens[3], Token::Colon);
+    }
+
+    #[test]
+    fn test_namespace_keywords() {
+        let source = "as use pub import";
+        let tokens: Vec<_> = Lexer::new(source).map(|(t, _)| t).collect();
+        assert_eq!(tokens, vec![Token::As, Token::Use, Token::Pub, Token::Import]);
+    }
+
+    #[test]
+    fn test_namespace_declaration() {
+        let source = "as std::io;";
+        let tokens: Vec<_> = Lexer::new(source).map(|(t, _)| t).collect();
+        assert_eq!(tokens, vec![
+            Token::As,
+            Token::Ident("std".to_string()),
+            Token::DoubleColon,
+            Token::Ident("io".to_string()),
+            Token::Semi
+        ]);
+    }
+
+    #[test]
+    fn test_use_declaration() {
+        let source = "use math::calc as calculator;";
+        let tokens: Vec<_> = Lexer::new(source).map(|(t, _)| t).collect();
+        assert_eq!(tokens, vec![
+            Token::Use,
+            Token::Ident("math".to_string()),
+            Token::DoubleColon,
+            Token::Ident("calc".to_string()),
+            Token::As,
+            Token::Ident("calculator".to_string()),
+            Token::Semi
+        ]);
     }
 }

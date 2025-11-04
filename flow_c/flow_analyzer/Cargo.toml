@@ -5,3 +5,4 @@ edition.workspace = true
 
 [dependencies]
 flow_ast = { path = "../flow_ast" }
+flow_parser = { path = "../flow_parser" }

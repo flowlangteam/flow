@@ -22,11 +22,18 @@ impl Parser {
     }
 
     pub fn parse(&mut self) -> ParseResult<Program> {
+        // Check for namespace declaration at the beginning
+        let namespace = if self.check(&Token::As) {
+            Some(self.parse_namespace_declaration()?)
+        } else {
+            None
+        };
+
         let mut items = Vec::new();
         while !self.is_at_end() {
             items.push(self.parse_item()?);
         }
-        Ok(Program { items })
+        Ok(Program { namespace, items })
     }
 
     fn parse_item(&mut self) -> ParseResult<Item> {
@@ -43,11 +50,13 @@ impl Parser {
             Some(Token::Impl) => Ok(Item::Impl(self.parse_impl()?)),
             Some(Token::Extern) => Ok(Item::ExternBlock(self.parse_extern_block()?)),
             Some(Token::Import) => Ok(Item::Import(self.parse_import()?)),
-            _ => Err(self.error("Expected item (func, struct, impl, extern, or import)")),
+            Some(Token::Use) => Ok(Item::Use(self.parse_use_declaration()?)),
+            _ => Err(self.error("Expected item (func, struct, impl, extern, import, or use)")),
         }
     }
 
     fn parse_function(&mut self, is_pub: bool) -> ParseResult<Function> {
+        let start_pos = self.pos;
         self.expect(&Token::Func)?;
         let name = self.expect_ident()?;
         
@@ -63,6 +72,7 @@ impl Parser {
         };
 
         let body = self.parse_block_or_expr()?;
+        let span = self.span_from(start_pos);
 
         Ok(Function {
             name,
@@ -70,6 +80,7 @@ impl Parser {
             return_type,
             body,
             is_pub,
+            span,
         })
     }
 
@@ -305,6 +316,36 @@ impl Parser {
         self.expect(&Token::Semi)?;
 
         Ok(Import { path, alias })
+    }
+
+    fn parse_namespace_declaration(&mut self) -> ParseResult<NamespaceDecl> {
+        self.expect(&Token::As)?;
+        
+        let namespace = self.expect_ident()?;
+        self.expect(&Token::DoubleColon)?;
+        let filename = self.expect_ident()?;
+        self.expect(&Token::Semi)?;
+
+        Ok(NamespaceDecl { namespace, filename })
+    }
+
+    fn parse_use_declaration(&mut self) -> ParseResult<UseDecl> {
+        self.expect(&Token::Use)?;
+        
+        let namespace = self.expect_ident()?;
+        self.expect(&Token::DoubleColon)?;
+        let filename = self.expect_ident()?;
+
+        let alias = if self.check(&Token::As) {
+            self.advance();
+            Some(self.expect_ident()?)
+        } else {
+            None
+        };
+
+        self.expect(&Token::Semi)?;
+
+        Ok(UseDecl { namespace, filename, alias })
     }
 
     fn parse_block_or_expr(&mut self) -> ParseResult<Expr> {
@@ -722,28 +763,59 @@ impl Parser {
                 let s = s.clone();
                 self.advance();
                 
-                // Check for struct initialization
-                if self.check(&Token::LBrace) {
+                // Check for namespace resolution (::)
+                if self.check(&Token::DoubleColon) {
                     self.advance();
-                    let mut fields = HashMap::new();
+                    let member = self.expect_ident()?;
+                    let namespaced_ident = format!("{}::{}", s, member);
                     
-                    while !self.check(&Token::RBrace) {
-                        let field_name = self.expect_ident()?;
-                        self.expect(&Token::Colon)?;
-                        let value = self.parse_expr()?;
-                        fields.insert(field_name, value);
-
-                        if !self.check(&Token::Comma) {
-                            break;
-                        }
+                    // Check for struct initialization
+                    if self.check(&Token::LBrace) {
                         self.advance();
+                        let mut fields = HashMap::new();
+                        
+                        while !self.check(&Token::RBrace) {
+                            let field_name = self.expect_ident()?;
+                            self.expect(&Token::Colon)?;
+                            let value = self.parse_expr()?;
+                            fields.insert(field_name, value);
+
+                            if !self.check(&Token::Comma) {
+                                break;
+                            }
+                            self.advance();
+                        }
+
+                        self.expect(&Token::RBrace)?;
+
+                        Ok(Expr::StructInit { name: namespaced_ident, fields })
+                    } else {
+                        Ok(Expr::Ident(namespaced_ident))
                     }
-
-                    self.expect(&Token::RBrace)?;
-
-                    Ok(Expr::StructInit { name: s, fields })
                 } else {
-                    Ok(Expr::Ident(s))
+                    // Check for struct initialization
+                    if self.check(&Token::LBrace) {
+                        self.advance();
+                        let mut fields = HashMap::new();
+                        
+                        while !self.check(&Token::RBrace) {
+                            let field_name = self.expect_ident()?;
+                            self.expect(&Token::Colon)?;
+                            let value = self.parse_expr()?;
+                            fields.insert(field_name, value);
+
+                            if !self.check(&Token::Comma) {
+                                break;
+                            }
+                            self.advance();
+                        }
+
+                        self.expect(&Token::RBrace)?;
+
+                        Ok(Expr::StructInit { name: s, fields })
+                    } else {
+                        Ok(Expr::Ident(s))
+                    }
                 }
             }
             Some(Token::LParen) => {
@@ -913,6 +985,30 @@ impl Parser {
         None
     }
 
+    fn span_from(&self, start_pos: usize) -> Span {
+        let start = if let Some((_, range)) = self.tokens.get(start_pos) {
+            range.start
+        } else {
+            0
+        };
+        
+        let end = if self.pos > 0 {
+            if let Some((_, range)) = self.tokens.get(self.pos - 1) {
+                range.end
+            } else {
+                start
+            }
+        } else {
+            start
+        };
+
+        Span {
+            start,
+            end,
+            file: None,
+        }
+    }
+
     fn error(&self, message: &str) -> ParseError {
         let span = if let Some((_, span)) = self.tokens.get(self.pos) {
             span.clone()
@@ -963,5 +1059,168 @@ mod tests {
         let mut parser = Parser::new(source);
         let program = parser.parse().unwrap();
         assert_eq!(program.items.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_namespace_declaration() {
+        let source = "as std::io; func add(x: i64, y: i64) -> i64 { x + y }";
+        let mut parser = Parser::new(source);
+        let program = parser.parse().unwrap();
+        
+        assert!(program.namespace.is_some());
+        let namespace = program.namespace.unwrap();
+        assert_eq!(namespace.namespace, "std");
+        assert_eq!(namespace.filename, "io");
+        assert_eq!(program.items.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_use_declaration() {
+        let source = "use std::io; func main() -> i64 { 42 }";
+        let mut parser = Parser::new(source);
+        let program = parser.parse().unwrap();
+        
+        assert!(program.namespace.is_none());
+        assert_eq!(program.items.len(), 2);
+        
+        match &program.items[0] {
+            Item::Use(use_decl) => {
+                assert_eq!(use_decl.namespace, "std");
+                assert_eq!(use_decl.filename, "io");
+                assert!(use_decl.alias.is_none());
+            }
+            _ => panic!("Expected Use item"),
+        }
+    }
+
+    #[test]
+    fn test_parse_use_declaration_with_alias() {
+        let source = "use std::io as stdio; func main() -> i64 { 42 }";
+        let mut parser = Parser::new(source);
+        let program = parser.parse().unwrap();
+        
+        assert_eq!(program.items.len(), 2);
+        
+        match &program.items[0] {
+            Item::Use(use_decl) => {
+                assert_eq!(use_decl.namespace, "std");
+                assert_eq!(use_decl.filename, "io");
+                assert_eq!(use_decl.alias, Some("stdio".to_string()));
+            }
+            _ => panic!("Expected Use item"),
+        }
+    }
+
+    #[test]
+    fn test_parse_multiple_use_declarations() {
+        let source = r#"
+            use std::io;
+            use math::calc as calculator;
+            func main() -> i64 { 42 }
+        "#;
+        let mut parser = Parser::new(source);
+        let program = parser.parse().unwrap();
+        
+        assert_eq!(program.items.len(), 3);
+        
+        match &program.items[0] {
+            Item::Use(use_decl) => {
+                assert_eq!(use_decl.namespace, "std");
+                assert_eq!(use_decl.filename, "io");
+                assert!(use_decl.alias.is_none());
+            }
+            _ => panic!("Expected Use item"),
+        }
+        
+        match &program.items[1] {
+            Item::Use(use_decl) => {
+                assert_eq!(use_decl.namespace, "math");
+                assert_eq!(use_decl.filename, "calc");
+                assert_eq!(use_decl.alias, Some("calculator".to_string()));
+            }
+            _ => panic!("Expected Use item"),
+        }
+    }
+
+    #[test]
+    fn test_parse_public_functions_in_namespace() {
+        let source = r#"
+            as utils::math;
+            
+            pub func add(x: i64, y: i64) -> i64 {
+                x + y
+            }
+            
+            func private_helper() -> i64 {
+                42
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let program = parser.parse().unwrap();
+        
+        assert!(program.namespace.is_some());
+        let namespace = program.namespace.unwrap();
+        assert_eq!(namespace.namespace, "utils");
+        assert_eq!(namespace.filename, "math");
+        
+        assert_eq!(program.items.len(), 2);
+        
+        match &program.items[0] {
+            Item::Function(func) => {
+                assert_eq!(func.name, "add");
+                assert!(func.is_pub);
+            }
+            _ => panic!("Expected Function item"),
+        }
+        
+        match &program.items[1] {
+            Item::Function(func) => {
+                assert_eq!(func.name, "private_helper");
+                assert!(!func.is_pub);
+            }
+            _ => panic!("Expected Function item"),
+        }
+    }
+
+    #[test]
+    fn test_parse_namespaced_function_call() {
+        let source = r#"
+            use std::math;
+            
+            func main() -> i64 {
+                math::add(5, 3)
+            }
+        "#;
+        let mut parser = Parser::new(source);
+        let program = parser.parse().unwrap();
+        
+        assert_eq!(program.items.len(), 2);
+        
+        match &program.items[0] {
+            Item::Use(use_decl) => {
+                assert_eq!(use_decl.namespace, "std");
+                assert_eq!(use_decl.filename, "math");
+            }
+            _ => panic!("Expected Use item"),
+        }
+        
+        match &program.items[1] {
+            Item::Function(func) => {
+                assert_eq!(func.name, "main");
+                match &func.body {
+                    Expr::Call { func: call_func, args } => {
+                        match call_func.as_ref() {
+                            Expr::Ident(name) => {
+                                assert_eq!(name, "math::add");
+                            }
+                            _ => panic!("Expected namespaced identifier in function call"),
+                        }
+                        assert_eq!(args.len(), 2);
+                    }
+                    _ => panic!("Expected function call in main body"),
+                }
+            }
+            _ => panic!("Expected Function item"),
+        }
     }
 }

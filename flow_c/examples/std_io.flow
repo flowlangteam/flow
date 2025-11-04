@@ -1,0 +1,13 @@
+as std::io;
+
+pub func add(x: i64, y: i64) -> i64 {
+    x + y
+}
+
+pub func multiply(x: i64, y: i64) -> i64 {
+    x * y
+}
+
+pub func square(x: i64) -> i64 {
+    x * x
+}

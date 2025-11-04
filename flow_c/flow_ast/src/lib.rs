@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
+    pub namespace: Option<NamespaceDecl>,
     pub items: Vec<Item>,
 }
 
@@ -12,6 +13,20 @@ pub enum Item {
     Impl(Impl),
     ExternBlock(ExternBlock),
     Import(Import),
+    Use(UseDecl),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct NamespaceDecl {
+    pub namespace: String,
+    pub filename: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UseDecl {
+    pub namespace: String,
+    pub filename: String,
+    pub alias: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -21,6 +36,7 @@ pub struct Function {
     pub return_type: Option<Type>,
     pub body: Expr,
     pub is_pub: bool,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -102,6 +118,7 @@ pub enum Type {
     Array(Box<Type>, usize),
     Slice(Box<Type>),
     
+    // @TODO: Implement full generics support with type variables and constraints
     // Type variables for generics (TODO)
     TypeVar(String),
 }

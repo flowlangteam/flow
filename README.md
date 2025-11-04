@@ -159,7 +159,8 @@ Flow/
 │   ├── flow_stdlib/           # Standard library
 │   ├── flow_transpiler/       # Base transpiler trait
 │   │   └── flow_transpiler_java/  # Java bytecode transpiler
-│   └── flow_jni/              # JNI bridge for Java interop
+│   ├── flow_jni/              # JNI bridge for Java interop
+│   └── flow_lsp/              # Language Server Protocol implementation
 ├── interop/                   # Language interop
 │   └── java/                  # Java integration
 │       ├── src/flow/
@@ -234,6 +235,25 @@ See [interop/java/SETUP.md](interop/java/SETUP.md) for complete documentation.
 - [ ] Package manager
 - [ ] Language server (LSP)
 - [ ] Debugger integration
+
+### Language Server
+
+Flow includes a Language Server Protocol (LSP) implementation for editor integration:
+
+```bash
+cd flow_c
+cargo build --package flow_lsp --release
+```
+
+The language server provides:
+- Real-time error diagnostics
+- Code completion and hover information
+- Go-to-definition and find references
+- Document symbols and outline view
+
+Compatible with VS Code, Neovim, Emacs, and other LSP-enabled editors.
+
+See [flow_c/flow_lsp/README.md](flow_c/flow_lsp/README.md) for setup instructions.
 
 ## Contributing
 

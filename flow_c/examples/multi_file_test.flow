@@ -1,0 +1,9 @@
+use std::io;
+use std::math;
+
+func main() -> i64 {
+    let x = math::add(5, 3);
+    let y = math::multiply(x, 2);
+    let z = io::print_twice(y);
+    z
+}

@@ -10,3 +10,4 @@ cranelift-jit.workspace = true
 cranelift-module.workspace = true
 cranelift-frontend.workspace = true
 cranelift-native.workspace = true
+cranelift-object = "0.112"

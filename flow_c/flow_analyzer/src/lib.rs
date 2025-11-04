@@ -1,10 +1,37 @@
 use flow_ast::*;
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::fs;
 
 pub struct Analyzer {
     warnings: Vec<Warning>,
     errors: Vec<AnalysisError>,
     scopes: Vec<Scope>,
+    // Multi-file support
+    modules: HashMap<String, ModuleInfo>,
+    current_namespace: Option<String>,
+    module_search_paths: Vec<PathBuf>,
+    parsed_modules: HashMap<String, Program>,
+    // Source tracking
+    current_source: Option<String>,
+    current_file_path: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ModuleInfo {
+    namespace: String,
+    filename: String,
+    public_functions: HashMap<String, FunctionInfo>,
+    public_structs: HashMap<String, StructInfo>,
+    file_path: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+struct StructInfo {
+    name: String,
+    fields: Vec<Field>,
+    span: Span,
+    is_pub: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -24,11 +51,11 @@ struct VariableInfo {
 }
 
 #[derive(Debug, Clone)]
-struct FunctionInfo {
-    params: Vec<Param>,
-    return_type: Option<Type>,
-    used: bool,
-    span: Span,
+pub struct FunctionInfo {
+    pub params: Vec<Param>,
+    pub return_type: Option<Type>,
+    pub used: bool,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -52,11 +79,26 @@ impl Analyzer {
             warnings: Vec::new(),
             errors: Vec::new(),
             scopes: vec![Scope::new()],
+            modules: HashMap::new(),
+            current_namespace: None,
+            module_search_paths: Vec::new(),
+            parsed_modules: HashMap::new(),
+            current_source: None,
+            current_file_path: None,
         }
     }
 
+    pub fn add_module_search_path(&mut self, path: PathBuf) {
+        self.module_search_paths.push(path);
+    }
+
     pub fn analyze(&mut self, program: &Program) -> Result<(), Vec<AnalysisError>> {
-        // First pass: collect all top-level declarations
+        // Handle namespace declaration
+        if let Some(namespace_decl) = &program.namespace {
+            self.current_namespace = Some(format!("{}::{}", namespace_decl.namespace, namespace_decl.filename));
+        }
+
+        // First pass: collect all top-level declarations and process imports
         for item in &program.items {
             match item {
                 Item::Function(func) => {
@@ -65,7 +107,12 @@ impl Analyzer {
                 Item::Struct(s) => {
                     self.declare_struct(s)?;
                 }
-                _ => {}
+                Item::Use(use_decl) => {
+                    self.process_use_declaration(use_decl)?;
+                }
+                Item::Import(_) | Item::ExternBlock(_) | Item::Impl(_) => {
+                    // These are handled in the second pass or don't need first-pass processing
+                }
             }
         }
 
@@ -124,8 +171,204 @@ impl Analyzer {
     }
 
     fn declare_struct(&mut self, _s: &Struct) -> Result<(), Vec<AnalysisError>> {
-        // TODO: Implement struct declaration
+        // @TODO: Implement struct declaration analysis and type checking
         Ok(())
+    }
+
+    fn process_use_declaration(&mut self, use_decl: &UseDecl) -> Result<(), Vec<AnalysisError>> {
+        let module_key = format!("{}::{}", use_decl.namespace, use_decl.filename);
+        
+        // Check if module is already loaded
+        if self.modules.contains_key(&module_key) {
+            return Ok(());
+        }
+        
+        // Find and load the module file
+        let module_file_path = self.find_module_file(&use_decl.namespace, &use_decl.filename)?;
+        
+        // Read and parse the module
+        let source = fs::read_to_string(&module_file_path)
+            .map_err(|e| vec![AnalysisError {
+                message: format!("Failed to read module file {}: {}", module_file_path.display(), e),
+                span: Span::new(0, 0),
+                severity: Severity::Error,
+            }])?;
+        
+        let mut parser = flow_parser::Parser::new(&source);
+        let module_program = parser.parse()
+            .map_err(|e| vec![AnalysisError {
+                message: format!("Failed to parse module {}: {}", module_key, e.message),
+                span: Span {
+                    start: e.span.start,
+                    end: e.span.end,
+                    file: Some(module_file_path.to_string_lossy().to_string()),
+                },
+                severity: Severity::Error,
+            }])?;
+        
+        // Verify the module has the correct namespace declaration
+        if let Some(namespace_decl) = &module_program.namespace {
+            let declared_key = format!("{}::{}", namespace_decl.namespace, namespace_decl.filename);
+            if declared_key != module_key {
+                return Err(vec![AnalysisError {
+                    message: format!("Module namespace mismatch: expected '{}', found '{}'", module_key, declared_key),
+                    span: Span::new(0, 0),
+                    severity: Severity::Error,
+                }]);
+            }
+        } else {
+            return Err(vec![AnalysisError {
+                message: format!("Module '{}' must have a namespace declaration", module_key),
+                span: Span::new(0, 0),
+                severity: Severity::Error,
+            }]);
+        }
+        
+        // Extract public items from the module
+        let mut public_functions = HashMap::new();
+        let mut public_structs = HashMap::new();
+        
+        for item in &module_program.items {
+            match item {
+                Item::Function(func) if func.is_pub => {
+                    let func_info = FunctionInfo {
+                        params: func.params.clone(),
+                        return_type: func.return_type.clone(),
+                        used: false,
+                        span: Span::new(0, 0),
+                    };
+                    public_functions.insert(func.name.clone(), func_info);
+                }
+                Item::Struct(struct_def) if struct_def.is_pub => {
+                    let struct_info = StructInfo {
+                        name: struct_def.name.clone(),
+                        fields: struct_def.fields.clone(),
+                        span: Span::new(0, 0),
+                        is_pub: true,
+                    };
+                    public_structs.insert(struct_def.name.clone(), struct_info);
+                }
+                _ => {} // Private items or other types
+            }
+        }
+        
+        // Store the module info
+        let module_info = ModuleInfo {
+            namespace: use_decl.namespace.clone(),
+            filename: use_decl.filename.clone(),
+            public_functions,
+            public_structs,
+            file_path: module_file_path,
+        };
+        self.modules.insert(module_key.clone(), module_info);
+        
+        // Store the parsed program for later use in codegen
+        self.parsed_modules.insert(module_key, module_program);
+        
+        Ok(())
+    }
+    
+    fn find_module_file(&self, namespace: &str, filename: &str) -> Result<PathBuf, Vec<AnalysisError>> {
+        for search_path in &self.module_search_paths {
+            // First try namespace/filename.flow structure (preferred)
+            let namespace_dir = search_path.join(namespace);
+            let candidate = namespace_dir.join(format!("{}.flow", filename));
+            if candidate.exists() {
+                return Ok(candidate);
+            }
+            
+            // Fallback to namespace_filename.flow format
+            let module_filename = format!("{}_{}.flow", namespace, filename);
+            let candidate = search_path.join(&module_filename);
+            if candidate.exists() {
+                return Ok(candidate);
+            }
+        }
+        
+        Err(vec![AnalysisError {
+            message: format!("Module file not found for '{}::{}' (searched for {}/{{filename}}.flow and {{namespace}}_{{filename}}.flow)", namespace, filename, namespace),
+            span: Span::new(0, 0),
+            severity: Severity::Error,
+        }])
+    }
+    
+    pub fn resolve_namespaced_function(&self, namespace_alias: &str, function_name: &str) -> Option<&FunctionInfo> {
+        // Find the module by alias or direct namespace reference
+        for (module_key, module_info) in &self.modules {
+            let module_parts: Vec<&str> = module_key.split("::").collect();
+            if module_parts.len() == 2 {
+                let (ns, filename) = (module_parts[0], module_parts[1]);
+                // Check if this matches the alias or direct reference
+                if namespace_alias == ns || namespace_alias == filename || namespace_alias == module_key {
+                    return module_info.public_functions.get(function_name);
+                }
+            }
+        }
+        None
+    }
+    
+    pub fn set_source_context(&mut self, source: String, file_path: String) {
+        self.current_source = Some(source);
+        self.current_file_path = Some(file_path);
+    }
+
+    fn estimate_expression_span(&self, expr: &Expr) -> Span {
+        
+        if let (Some(source), Some(file_path)) = (&self.current_source, &self.current_file_path) {
+            match expr {
+                Expr::Call { func, .. } => {
+                    if let Expr::Ident(name) = func.as_ref() {
+                        return self.find_identifier_span(source, name, file_path);
+                    }
+                }
+                Expr::Ident(name) => {
+                    return self.find_identifier_span(source, name, file_path);
+                }
+                _ => {}
+            }
+        }
+        
+        // Fallback to a default span
+        Span::new(0, 0)
+    }
+
+    fn find_identifier_span(&self, source: &str, name: &str, file_path: &str) -> Span {
+        // Find all occurrences of the identifier
+        let mut matches = Vec::new();
+        let mut start = 0;
+        
+        while let Some(pos) = source[start..].find(name) {
+            let absolute_pos = start + pos;
+            
+            // Check if this is a whole word (not part of another identifier)
+            let is_word_start = absolute_pos == 0 || 
+                !source.chars().nth(absolute_pos - 1).unwrap_or(' ').is_alphanumeric();
+            
+            let is_word_end = absolute_pos + name.len() >= source.len() || 
+                !source.chars().nth(absolute_pos + name.len()).unwrap_or(' ').is_alphanumeric();
+            
+            if is_word_start && is_word_end {
+                matches.push(absolute_pos);
+            }
+            
+            start = absolute_pos + 1;
+        }
+        
+    
+        if let Some(&pos) = matches.first() {
+            return Span {
+                start: pos,
+                end: pos + name.len(),
+                file: Some(file_path.to_string()),
+            };
+        }
+        
+        // Fallback
+        Span::new(0, 0)
+    }
+
+    pub fn get_parsed_modules(&self) -> &HashMap<String, Program> {
+        &self.parsed_modules
     }
 
     fn analyze_function(&mut self, func: &Function) -> Result<(), Vec<AnalysisError>> {
@@ -148,7 +391,7 @@ impl Analyzer {
                         "Function '{}' returns {:?} but expected {:?}",
                         func.name, body_type, expected_type
                     ),
-                    span: Span::new(0, 0),
+                    span: func.span.clone(),
                     severity: Severity::Error,
                 });
             }
@@ -166,6 +409,17 @@ impl Analyzer {
     }
 
     fn analyze_expr(&mut self, expr: &Expr) -> Result<Type, Vec<AnalysisError>> {
+        self.analyze_expr_with_span(expr, Span::new(0, 0))
+    }
+
+    fn analyze_expr_with_span(&mut self, expr: &Expr, expr_span: Span) -> Result<Type, Vec<AnalysisError>> {
+        // If we have a default span (0, 0), try to estimate a better one
+        let span = if expr_span.start == 0 && expr_span.end == 0 {
+            self.estimate_expression_span(expr)
+        } else {
+            expr_span
+        };
+        
         match expr {
             Expr::Integer(_) => Ok(Type::I64), // Default integer type
             Expr::Float(_) => Ok(Type::F64),
@@ -227,7 +481,7 @@ impl Analyzer {
                                 "Type mismatch: expected {:?}, found {:?}",
                                 annotated_type, value_type
                             ),
-                            span: Span::new(0, 0),
+                            span: span.clone(),
                             severity: Severity::Error,
                         });
                     }
@@ -244,7 +498,7 @@ impl Analyzer {
                 if !matches!(cond_type, Type::Bool) {
                     self.errors.push(AnalysisError {
                         message: "Condition must be of type bool".to_string(),
-                        span: Span::new(0, 0),
+                        span: span.clone(),
                         severity: Severity::Error,
                     });
                 }
@@ -289,7 +543,7 @@ impl Analyzer {
                                     func_info.params.len(),
                                     args.len()
                                 ),
-                                span: Span::new(0, 0),
+                                span: span.clone(),
                                 severity: Severity::Error,
                             });
                         }
@@ -306,7 +560,7 @@ impl Analyzer {
                                         param.ty,
                                         arg_type
                                     ),
-                                    span: Span::new(0, 0),
+                                    span: span.clone(),
                                     severity: Severity::Error,
                                 });
                             }
@@ -316,12 +570,13 @@ impl Analyzer {
                     } else {
                         self.errors.push(AnalysisError {
                             message: format!("Undefined function '{}'", name),
-                            span: Span::new(0, 0),
+                            span: span.clone(),
                             severity: Severity::Error,
                         });
                         Ok(Type::Unit)
                     }
                 } else {
+                    // @TODO: Implement proper type checking for higher-order function calls
                     // Higher-order function call
                     let _func_type = self.analyze_expr(func)?;
                     Ok(Type::Unit) // Simplified for now
@@ -441,24 +696,55 @@ impl Analyzer {
     }
 
     fn find_function(&self, name: &str) -> Option<FunctionInfo> {
+        // First check local scopes
         for scope in self.scopes.iter().rev() {
             if let Some(info) = scope.functions.get(name) {
                 return Some(info.clone());
             }
         }
+        
+        // If not found locally, check if it's a namespaced function call
+        if name.contains("::") {
+            let parts: Vec<&str> = name.split("::").collect();
+            if parts.len() == 2 {
+                let (namespace_or_alias, function_name) = (parts[0], parts[1]);
+                
+                // Look for a module that matches this namespace/alias
+                for (module_key, module_info) in &self.modules {
+                    let module_parts: Vec<&str> = module_key.split("::").collect();
+                    if module_parts.len() == 2 {
+                        let (ns, filename) = (module_parts[0], module_parts[1]);
+                        
+                        // Check if the namespace_or_alias matches the namespace, filename, or full key
+                        if namespace_or_alias == ns || 
+                           namespace_or_alias == filename || 
+                           namespace_or_alias == module_key {
+                            
+                            if let Some(func_info) = module_info.public_functions.get(function_name) {
+                                return Some(func_info.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
         None
     }
 
     fn mark_function_used(&mut self, name: &str) {
+        // First try local scopes
         for scope in self.scopes.iter_mut().rev() {
             if let Some(info) = scope.functions.get_mut(name) {
                 info.used = true;
                 return;
             }
         }
+        
     }
 
     fn types_compatible(&self, a: &Type, b: &Type) -> bool {
+        // @TODO: Implement comprehensive type compatibility checking including coercion rules
         // Simplified type compatibility check
         match (a, b) {
             (Type::I8, Type::I8) | (Type::I16, Type::I16) | (Type::I32, Type::I32)
@@ -539,6 +825,7 @@ mod tests {
     #[test]
     fn test_unused_variable_warning() {
         let program = Program {
+            namespace: None,
             items: vec![Item::Function(Function {
                 name: "main".to_string(),
                 params: vec![],
@@ -563,6 +850,7 @@ mod tests {
     #[test]
     fn test_type_mismatch_error() {
         let program = Program {
+            namespace: None,
             items: vec![Item::Function(Function {
                 name: "main".to_string(),
                 params: vec![],
@@ -576,5 +864,69 @@ mod tests {
         let result = analyzer.analyze(&program);
         
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_namespace_declaration() {
+        let program = Program {
+            namespace: Some(NamespaceDecl {
+                namespace: "std".to_string(),
+                filename: "math".to_string(),
+            }),
+            items: vec![Item::Function(Function {
+                name: "add".to_string(),
+                params: vec![
+                    Param { name: "x".to_string(), ty: Type::I64 },
+                    Param { name: "y".to_string(), ty: Type::I64 },
+                ],
+                return_type: Some(Type::I64),
+                body: Expr::Binary {
+                    op: BinOp::Add,
+                    left: Box::new(Expr::Ident("x".to_string())),
+                    right: Box::new(Expr::Ident("y".to_string())),
+                },
+                is_pub: true,
+            })],
+        };
+
+        let mut analyzer = Analyzer::new();
+        let result = analyzer.analyze(&program);
+        
+        assert!(result.is_ok());
+        assert_eq!(analyzer.current_namespace, Some("std::math".to_string()));
+    }
+
+    #[test]
+    fn test_use_declaration() {
+        let program = Program {
+            namespace: None,
+            items: vec![
+                Item::Use(UseDecl {
+                    namespace: "std".to_string(),
+                    filename: "math".to_string(),
+                    alias: None,
+                }),
+                Item::Function(Function {
+                    name: "main".to_string(),
+                    params: vec![],
+                    return_type: Some(Type::I64),
+                    body: Expr::Integer(42),
+                    is_pub: false,
+                })
+            ],
+        };
+
+        let mut analyzer = Analyzer::new();
+        // Add the test files directory to search path
+        analyzer.add_module_search_path(PathBuf::from("test_files"));
+        
+        let result = analyzer.analyze(&program);
+        
+        if result.is_err() {
+            eprintln!("Analysis error: {:?}", result);
+        }
+        
+        assert!(result.is_ok());
+        assert!(analyzer.modules.contains_key("std::math"));
     }
 }

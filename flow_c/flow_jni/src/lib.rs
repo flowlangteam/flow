@@ -143,9 +143,11 @@ pub extern "system" fn Java_flow_bridge_FlowBridge_callNativeFunction(
         }
     };
 
+    // @TODO: Implement full argument marshalling for all types
     // Parse args array (for now, support simple cases)
     // TODO: Implement full argument marshalling
     
+    // @TODO: Support functions with parameters - currently assumes no-arg functions
     // Call the function (assuming no-arg for now)
     unsafe {
         let func: fn() -> f64 = std::mem::transmute(func_ptr);

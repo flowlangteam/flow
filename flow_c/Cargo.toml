@@ -11,6 +11,7 @@ members = [
     "flow_transpiler",
     "flow_transpiler/flow_transpiler_java",
     "flow_jni",
+    "flow_lsp",
 ]
 resolver = "2"
 
