@@ -1,8 +1,8 @@
 use flow_analyzer::{AnalysisError, Analyzer, Severity as AnalysisSeverity};
 use flow_ast::{Program, Span, Warning};
 use flow_parser::Parser;
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range, Url};
 use std::collections::HashMap;
+use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range, Url};
 
 /// Bridge between Flow analyzer and LSP diagnostics
 pub struct AnalyzerBridge {
@@ -75,10 +75,10 @@ impl AnalyzerBridge {
             if self.analyzer.analyze(&program).is_ok() {
                 // Add keyword completions
                 completions.extend(self.get_keyword_completions());
-                
+
                 // Add function completions
                 completions.extend(self.get_function_completions(&program));
-                
+
                 // Add type completions
                 completions.extend(self.get_type_completions(&program));
             }
@@ -126,30 +126,25 @@ impl AnalyzerBridge {
     /// Convert warning to LSP diagnostic
     fn warning_to_diagnostic(&self, warning: &Warning, text: &str) -> Option<Diagnostic> {
         let (message, span) = match warning {
-            Warning::UnusedVariable { name, span } => {
-                (format!("Unused variable: {}", name), span)
-            }
-            Warning::UnusedFunction { name, span } => {
-                (format!("Unused function: {}", name), span)
-            }
-            Warning::DeadCode { span } => {
-                ("Dead code".to_string(), span)
-            }
-            Warning::UnnecessaryMut { name, span } => {
-                (format!("Unnecessary mutable modifier for variable: {}", name), span)
-            }
-            Warning::PossibleMemoryLeak { span } => {
-                ("Possible memory leak".to_string(), span)
-            }
+            Warning::UnusedVariable { name, span } => (format!("Unused variable: {}", name), span),
+            Warning::UnusedFunction { name, span } => (format!("Unused function: {}", name), span),
+            Warning::DeadCode { span } => ("Dead code".to_string(), span),
+            Warning::UnnecessaryMut { name, span } => (
+                format!("Unnecessary mutable modifier for variable: {}", name),
+                span,
+            ),
+            Warning::PossibleMemoryLeak { span } => ("Possible memory leak".to_string(), span),
             Warning::UnsafeOperation { description, span } => {
                 (format!("Unsafe operation: {}", description), span)
             }
-            Warning::ImplicitConversion { from, to, span } => {
-                (format!("Implicit conversion from {:?} to {:?}", from, to), span)
-            }
-            Warning::ShadowedVariable { name, span } => {
-                (format!("Variable shadows previous declaration: {}", name), span)
-            }
+            Warning::ImplicitConversion { from, to, span } => (
+                format!("Implicit conversion from {:?} to {:?}", from, to),
+                span,
+            ),
+            Warning::ShadowedVariable { name, span } => (
+                format!("Variable shadows previous declaration: {}", name),
+                span,
+            ),
         };
 
         Some(Diagnostic {
@@ -170,9 +165,27 @@ impl AnalyzerBridge {
         use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind};
 
         let keywords = [
-            "func", "struct", "impl", "let", "mut", "if", "else", "match", "return",
-            "true", "false", "pub", "extern", "import", "use", "namespace",
-            "lambda", "temp", "unsafe", "alloc", "free",
+            "func",
+            "struct",
+            "impl",
+            "let",
+            "mut",
+            "if",
+            "else",
+            "match",
+            "return",
+            "true",
+            "false",
+            "pub",
+            "extern",
+            "import",
+            "use",
+            "namespace",
+            "lambda",
+            "temp",
+            "unsafe",
+            "alloc",
+            "free",
         ];
 
         keywords
@@ -211,9 +224,16 @@ impl AnalyzerBridge {
                 completions.push(CompletionItem {
                     label: func.name.clone(),
                     kind: Some(CompletionItemKind::FUNCTION),
-                    detail: Some(format!("func {}({}){}", func.name, params_str, return_type_str)),
-                    insert_text: Some(format!("{}({})", func.name, 
-                        func.params.iter().enumerate()
+                    detail: Some(format!(
+                        "func {}({}){}",
+                        func.name, params_str, return_type_str
+                    )),
+                    insert_text: Some(format!(
+                        "{}({})",
+                        func.name,
+                        func.params
+                            .iter()
+                            .enumerate()
                             .map(|(i, p)| format!("${{{i}:{}}}", p.name, i = i + 1))
                             .collect::<Vec<_>>()
                             .join(", ")
@@ -236,10 +256,8 @@ impl AnalyzerBridge {
 
         // Built-in types
         let builtin_types = [
-            "Int", "I8", "I16", "I32", "I64", "I128",
-            "UInt", "U8", "U16", "U32", "U64", "U128",
-            "Float", "F32", "F64",
-            "Bool", "Char", "String", "Unit",
+            "Int", "I8", "I16", "I32", "I64", "I128", "UInt", "U8", "U16", "U32", "U64", "U128",
+            "Float", "F32", "F64", "Bool", "Char", "String", "Unit",
         ];
 
         for &type_name in &builtin_types {
@@ -291,12 +309,12 @@ fn parse_error_to_range(range: &std::ops::Range<usize>, text: &str) -> Range {
 fn offset_to_position(offset: usize, text: &str) -> Position {
     let mut line = 0u32;
     let mut character = 0u32;
-    
+
     for (i, ch) in text.char_indices() {
         if i >= offset {
             break;
         }
-        
+
         if ch == '\n' {
             line += 1;
             character = 0;
@@ -304,7 +322,7 @@ fn offset_to_position(offset: usize, text: &str) -> Position {
             character += 1;
         }
     }
-    
+
     Position { line, character }
 }
 

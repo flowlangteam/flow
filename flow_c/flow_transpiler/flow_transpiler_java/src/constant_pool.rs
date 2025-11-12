@@ -21,12 +21,12 @@ pub enum ConstantPoolEntry {
     Float(f32),
     Long(i64),
     Double(f64),
-    Class(u16),             // name_index
-    String(u16),            // utf8_index
-    Fieldref(u16, u16),     // class_index, name_and_type_index
-    Methodref(u16, u16),    // class_index, name_and_type_index
-    NameAndType(u16, u16),  // name_index, descriptor_index
-    Placeholder,            // Takes a slot but is not written (for Long/Double second slot)
+    Class(u16),            // name_index
+    String(u16),           // utf8_index
+    Fieldref(u16, u16),    // class_index, name_and_type_index
+    Methodref(u16, u16),   // class_index, name_and_type_index
+    NameAndType(u16, u16), // name_index, descriptor_index
+    Placeholder,           // Takes a slot but is not written (for Long/Double second slot)
 }
 
 pub struct ConstantPool {
@@ -39,7 +39,7 @@ pub struct ConstantPool {
     fieldref_map: HashMap<(String, String, String), u16>,
     integer_map: HashMap<i32, u16>,
     long_map: HashMap<i64, u16>,
-    float_map: HashMap<u32, u16>, // Store as bits for proper equality
+    float_map: HashMap<u32, u16>,  // Store as bits for proper equality
     double_map: HashMap<u64, u16>, // Store as bits for proper equality
 }
 
@@ -59,114 +59,131 @@ impl ConstantPool {
             double_map: HashMap::new(),
         }
     }
-    
+
     pub fn add_utf8(&mut self, value: impl Into<String>) -> u16 {
         let value = value.into();
         if let Some(&index) = self.utf8_map.get(&value) {
             return index;
         }
-        
+
         self.entries.push(ConstantPoolEntry::Utf8(value.clone()));
         let index = self.entries.len() as u16;
         self.utf8_map.insert(value, index);
         index
     }
-    
+
     pub fn add_class(&mut self, name: impl Into<String>) -> u16 {
         let name = name.into();
         if let Some(&index) = self.class_map.get(&name) {
             return index;
         }
-        
+
         let name_index = self.add_utf8(name.clone());
         self.entries.push(ConstantPoolEntry::Class(name_index));
         let index = self.entries.len() as u16;
         self.class_map.insert(name, index);
         index
     }
-    
+
     pub fn add_string(&mut self, value: impl Into<String>) -> u16 {
         let value = value.into();
         if let Some(&index) = self.string_map.get(&value) {
             return index;
         }
-        
+
         let utf8_index = self.add_utf8(value.clone());
         self.entries.push(ConstantPoolEntry::String(utf8_index));
         let index = self.entries.len() as u16;
         self.string_map.insert(value, index);
         index
     }
-    
-    pub fn add_name_and_type(&mut self, name: impl Into<String>, descriptor: impl Into<String>) -> u16 {
+
+    pub fn add_name_and_type(
+        &mut self,
+        name: impl Into<String>,
+        descriptor: impl Into<String>,
+    ) -> u16 {
         let name = name.into();
         let descriptor = descriptor.into();
         let key = (name.clone(), descriptor.clone());
-        
+
         if let Some(&index) = self.nat_map.get(&key) {
             return index;
         }
-        
+
         let name_index = self.add_utf8(name);
         let desc_index = self.add_utf8(descriptor);
-        self.entries.push(ConstantPoolEntry::NameAndType(name_index, desc_index));
+        self.entries
+            .push(ConstantPoolEntry::NameAndType(name_index, desc_index));
         let index = self.entries.len() as u16;
         self.nat_map.insert(key, index);
         index
     }
-    
-    pub fn add_methodref(&mut self, class: impl Into<String>, name: impl Into<String>, descriptor: impl Into<String>) -> u16 {
+
+    pub fn add_methodref(
+        &mut self,
+        class: impl Into<String>,
+        name: impl Into<String>,
+        descriptor: impl Into<String>,
+    ) -> u16 {
         let class = class.into();
         let name = name.into();
         let descriptor = descriptor.into();
         let key = (class.clone(), name.clone(), descriptor.clone());
-        
+
         if let Some(&index) = self.methodref_map.get(&key) {
             return index;
         }
-        
+
         let class_index = self.add_class(class);
         let nat_index = self.add_name_and_type(name, descriptor);
-        self.entries.push(ConstantPoolEntry::Methodref(class_index, nat_index));
+        self.entries
+            .push(ConstantPoolEntry::Methodref(class_index, nat_index));
         let index = self.entries.len() as u16;
         self.methodref_map.insert(key, index);
         index
     }
-    
-    pub fn add_fieldref(&mut self, class: impl Into<String>, name: impl Into<String>, descriptor: impl Into<String>) -> u16 {
+
+    pub fn add_fieldref(
+        &mut self,
+        class: impl Into<String>,
+        name: impl Into<String>,
+        descriptor: impl Into<String>,
+    ) -> u16 {
         let class = class.into();
         let name = name.into();
         let descriptor = descriptor.into();
         let key = (class.clone(), name.clone(), descriptor.clone());
-        
+
         if let Some(&index) = self.fieldref_map.get(&key) {
             return index;
         }
-        
+
         let class_index = self.add_class(class);
         let nat_index = self.add_name_and_type(name, descriptor);
-        self.entries.push(ConstantPoolEntry::Fieldref(class_index, nat_index));
+        self.entries
+            .push(ConstantPoolEntry::Fieldref(class_index, nat_index));
         let index = self.entries.len() as u16;
         self.fieldref_map.insert(key, index);
         index
     }
-    
+
     pub fn add_integer(&mut self, value: i32) -> u16 {
         if let Some(&index) = self.integer_map.get(&value) {
             return index;
         }
-        
+
         self.entries.push(ConstantPoolEntry::Integer(value));
         let index = self.entries.len() as u16;
         self.integer_map.insert(value, index);
         index
     }
-    
+
     pub fn add_long(&mut self, value: i64) -> u16 {
         if let Some(&index) = self.long_map.get(&value) {
             return index;
         }
-        
+
         self.entries.push(ConstantPoolEntry::Long(value));
         let index = self.entries.len() as u16;
         self.long_map.insert(value, index);
@@ -174,25 +191,25 @@ impl ConstantPool {
         self.entries.push(ConstantPoolEntry::Placeholder);
         index
     }
-    
+
     pub fn add_float(&mut self, value: f32) -> u16 {
         let bits = value.to_bits();
         if let Some(&index) = self.float_map.get(&bits) {
             return index;
         }
-        
+
         self.entries.push(ConstantPoolEntry::Float(value));
         let index = self.entries.len() as u16;
         self.float_map.insert(bits, index);
         index
     }
-    
+
     pub fn add_double(&mut self, value: f64) -> u16 {
         let bits = value.to_bits();
         if let Some(&index) = self.double_map.get(&bits) {
             return index;
         }
-        
+
         self.entries.push(ConstantPoolEntry::Double(value));
         let index = self.entries.len() as u16;
         self.double_map.insert(bits, index);
@@ -200,24 +217,33 @@ impl ConstantPool {
         self.entries.push(ConstantPoolEntry::Placeholder);
         index
     }
-    
+
     // Getter methods - return existing indices without adding new entries
     pub fn get_utf8_index(&self, value: &str) -> u16 {
-        *self.utf8_map.get(value).expect("UTF8 entry not found in constant pool")
+        *self
+            .utf8_map
+            .get(value)
+            .expect("UTF8 entry not found in constant pool")
     }
-    
+
     pub fn get_class_index(&self, name: &str) -> u16 {
-        *self.class_map.get(name).expect("Class entry not found in constant pool")
+        *self
+            .class_map
+            .get(name)
+            .expect("Class entry not found in constant pool")
     }
-    
+
     pub fn get_string_index(&self, value: &str) -> u16 {
-        *self.string_map.get(value).expect("String entry not found in constant pool")
+        *self
+            .string_map
+            .get(value)
+            .expect("String entry not found in constant pool")
     }
-    
+
     pub fn write<W: Write>(&self, writer: &mut W) -> std::io::Result<()> {
         // Write count (number of entries + 1)
         writer.write_u16::<BigEndian>((self.entries.len() + 1) as u16)?;
-        
+
         // Write entries
         for entry in &self.entries {
             match entry {
@@ -271,7 +297,7 @@ impl ConstantPool {
                 }
             }
         }
-        
+
         Ok(())
     }
 }

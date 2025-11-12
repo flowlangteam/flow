@@ -1,6 +1,6 @@
 use flow_ast::*;
 use flow_analyzer::Analyzer;
-use flow_codegen::Compiler;
+use flow_compiler::{FlowCompilerBuilder, CompilationTarget};
 use std::collections::HashMap;
 use std::path::PathBuf;
 

@@ -1,21 +1,22 @@
 // Struct and implementation example
 struct Point {
-    pub x: Int,
-    pub y: Int
+    pub x: i64,
+    pub y: i64
+}
+
+func new_point(x: i64, y: i64) -> Point {
+    Point { x: x, y: y }
 }
 
 impl Point {
-    fn new(x: Int, y: Int) -> Point {
-        Point { x: x, y: y }
-    }
-
-    fn distance_from_origin(self) -> Int {
-        // Simplified - would normally use sqrt
-        self.x * self.x + self.y * self.y
+    func distance_from_origin(point: Point) -> i64 {
+        let x_sq = point.x * point.x;
+        let y_sq = point.y * point.y;
+        x_sq + y_sq
     }
 }
 
-fn main() -> Int {
-    let p = Point::new(3, 4);
+func main() -> i64 {
+    let p = new_point(3, 4);
     p.distance_from_origin()
 }

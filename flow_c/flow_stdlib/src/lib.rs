@@ -59,7 +59,7 @@ pub extern "C" fn flow_print_char(value: u32) {
 #[unsafe(no_mangle)]
 pub extern "C" fn flow_read_line() -> *mut FlowString {
     use std::io::{self, BufRead};
-    
+
     let mut input = String::new();
     if io::stdin().lock().read_line(&mut input).is_ok() {
         // Remove trailing newline
@@ -69,12 +69,12 @@ pub extern "C" fn flow_read_line() -> *mut FlowString {
                 input.pop();
             }
         }
-        
+
         let bytes = input.into_bytes();
         let len = bytes.len();
         let ptr = bytes.as_ptr();
         std::mem::forget(bytes);
-        
+
         Box::into_raw(Box::new(FlowString {
             data: ptr,
             len,
@@ -88,7 +88,7 @@ pub extern "C" fn flow_read_line() -> *mut FlowString {
 #[unsafe(no_mangle)]
 pub extern "C" fn flow_read_i64() -> i64 {
     use std::io::{self, BufRead};
-    
+
     let mut input = String::new();
     if io::stdin().lock().read_line(&mut input).is_ok() {
         input.trim().parse().unwrap_or(0)
@@ -100,7 +100,7 @@ pub extern "C" fn flow_read_i64() -> i64 {
 #[unsafe(no_mangle)]
 pub extern "C" fn flow_read_f64() -> f64 {
     use std::io::{self, BufRead};
-    
+
     let mut input = String::new();
     if io::stdin().lock().read_line(&mut input).is_ok() {
         input.trim().parse().unwrap_or(0.0)
@@ -126,7 +126,7 @@ pub extern "C" fn flow_string_new(data: *const u8, len: usize) -> *mut FlowStrin
         let capacity = owned.capacity();
         let ptr = owned.as_ptr();
         std::mem::forget(owned);
-        
+
         Box::into_raw(Box::new(FlowString {
             data: ptr,
             len,
@@ -140,34 +140,33 @@ pub extern "C" fn flow_string_free(s: *mut FlowString) {
     unsafe {
         if !s.is_null() {
             let string = Box::from_raw(s);
-            let _ = Vec::from_raw_parts(
-                string.data as *mut u8,
-                string.len,
-                string.capacity,
-            );
+            let _ = Vec::from_raw_parts(string.data as *mut u8, string.len, string.capacity);
         }
     }
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn flow_string_concat(a: *const FlowString, b: *const FlowString) -> *mut FlowString {
+pub extern "C" fn flow_string_concat(
+    a: *const FlowString,
+    b: *const FlowString,
+) -> *mut FlowString {
     unsafe {
         if a.is_null() || b.is_null() {
             return std::ptr::null_mut();
         }
-        
+
         let a_slice = std::slice::from_raw_parts((*a).data, (*a).len);
         let b_slice = std::slice::from_raw_parts((*b).data, (*b).len);
-        
+
         let mut result = Vec::with_capacity(a_slice.len() + b_slice.len());
         result.extend_from_slice(a_slice);
         result.extend_from_slice(b_slice);
-        
+
         let len = result.len();
         let capacity = result.capacity();
         let ptr = result.as_ptr();
         std::mem::forget(result);
-        
+
         Box::into_raw(Box::new(FlowString {
             data: ptr,
             len,
@@ -178,13 +177,7 @@ pub extern "C" fn flow_string_concat(a: *const FlowString, b: *const FlowString)
 
 #[unsafe(no_mangle)]
 pub extern "C" fn flow_string_len(s: *const FlowString) -> usize {
-    unsafe {
-        if s.is_null() {
-            0
-        } else {
-            (*s).len
-        }
-    }
+    unsafe { if s.is_null() { 0 } else { (*s).len } }
 }
 
 // Generic memory allocation
@@ -215,12 +208,17 @@ pub extern "C" fn flow_free(ptr: *mut u8, size: usize, align: usize) {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn flow_realloc(ptr: *mut u8, old_size: usize, new_size: usize, align: usize) -> *mut u8 {
+pub extern "C" fn flow_realloc(
+    ptr: *mut u8,
+    old_size: usize,
+    new_size: usize,
+    align: usize,
+) -> *mut u8 {
     unsafe {
         if ptr.is_null() {
             return flow_alloc(new_size, align);
         }
-        
+
         let old_layout = std::alloc::Layout::from_size_align_unchecked(old_size, align);
         std::alloc::realloc(ptr, old_layout, new_size)
     }
@@ -232,7 +230,7 @@ pub extern "C" fn flow_realloc(ptr: *mut u8, old_size: usize, new_size: usize, a
 pub extern "C" fn flow_array_new(elem_size: usize, capacity: usize) -> *mut FlowArray {
     let total_size = elem_size * capacity;
     let data = unsafe { flow_alloc_zeroed(total_size, 8) };
-    
+
     Box::into_raw(Box::new(FlowArray {
         data,
         len: 0,
@@ -246,11 +244,7 @@ pub extern "C" fn flow_array_free(arr: *mut FlowArray) {
     unsafe {
         if !arr.is_null() {
             let array = Box::from_raw(arr);
-            flow_free(
-                array.data,
-                array.capacity * array.elem_size,
-                8,
-            );
+            flow_free(array.data, array.capacity * array.elem_size, 8);
         }
     }
 }
@@ -337,7 +331,9 @@ mod tests {
         let data = b"Hello";
         let s = flow_string_new(data.as_ptr(), data.len());
         assert_eq!(flow_string_len(s), 5);
-        unsafe { flow_string_free(s); }
+        unsafe {
+            flow_string_free(s);
+        }
     }
 
     #[test]

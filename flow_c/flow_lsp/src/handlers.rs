@@ -1,13 +1,12 @@
 use crate::analyzer_bridge::AnalyzerBridge;
 use crate::document::{Document, DocumentManager};
 use crate::utils::is_flow_file;
-use tower_lsp::lsp_types::{
-    CompletionParams, CompletionResponse, Diagnostic, GotoDefinitionParams,
-    GotoDefinitionResponse, Hover, HoverContents, HoverParams, Location, MarkedString, Position,
-    Range, Url,
-};
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tower_lsp::lsp_types::{
+    CompletionParams, CompletionResponse, Diagnostic, GotoDefinitionParams, GotoDefinitionResponse,
+    Hover, HoverContents, HoverParams, Location, MarkedString, Position, Range, Url,
+};
 
 pub struct Handlers {
     document_manager: Arc<DocumentManager>,
@@ -87,7 +86,10 @@ impl Handlers {
     }
 
     /// Handle textDocument/definition
-    pub async fn goto_definition(&self, params: GotoDefinitionParams) -> Option<GotoDefinitionResponse> {
+    pub async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Option<GotoDefinitionResponse> {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
@@ -107,7 +109,10 @@ impl Handlers {
     }
 
     /// Handle textDocument/references
-    pub async fn find_references(&self, params: tower_lsp::lsp_types::ReferenceParams) -> Option<Vec<Location>> {
+    pub async fn find_references(
+        &self,
+        params: tower_lsp::lsp_types::ReferenceParams,
+    ) -> Option<Vec<Location>> {
         let uri = &params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
 
@@ -129,7 +134,10 @@ impl Handlers {
     }
 
     /// Handle textDocument/documentSymbol
-    pub async fn document_symbols(&self, params: tower_lsp::lsp_types::DocumentSymbolParams) -> Option<tower_lsp::lsp_types::DocumentSymbolResponse> {
+    pub async fn document_symbols(
+        &self,
+        params: tower_lsp::lsp_types::DocumentSymbolParams,
+    ) -> Option<tower_lsp::lsp_types::DocumentSymbolResponse> {
         let uri = &params.text_document.uri;
 
         if !is_flow_file(uri) {
@@ -150,24 +158,28 @@ impl Handlers {
         // Simple implementation - find the word boundaries
         let offset = document.position_to_offset(position).unwrap_or(0);
         let text = document.get_text();
-        
+
         // Find start of word
         let mut start_offset = offset;
         let chars: Vec<char> = text.chars().collect();
-        
-        while start_offset > 0 && (chars[start_offset - 1].is_alphanumeric() || chars[start_offset - 1] == '_') {
+
+        while start_offset > 0
+            && (chars[start_offset - 1].is_alphanumeric() || chars[start_offset - 1] == '_')
+        {
             start_offset -= 1;
         }
-        
+
         // Find end of word
         let mut end_offset = offset;
-        while end_offset < chars.len() && (chars[end_offset].is_alphanumeric() || chars[end_offset] == '_') {
+        while end_offset < chars.len()
+            && (chars[end_offset].is_alphanumeric() || chars[end_offset] == '_')
+        {
             end_offset += 1;
         }
-        
+
         let start_pos = document.offset_to_position(start_offset);
         let end_pos = document.offset_to_position(end_offset);
-        
+
         Range {
             start: start_pos,
             end: end_pos,
@@ -217,13 +229,21 @@ impl Handlers {
             let mut start = 0;
             while let Some(pos) = line[start..].find(word) {
                 let actual_pos = start + pos;
-                
+
                 // Check if it's a whole word (not part of another identifier)
                 let is_word_boundary = {
-                    let before_ok = actual_pos == 0 || 
-                        !line.chars().nth(actual_pos - 1).unwrap_or(' ').is_alphanumeric();
-                    let after_ok = actual_pos + word.len() >= line.len() ||
-                        !line.chars().nth(actual_pos + word.len()).unwrap_or(' ').is_alphanumeric();
+                    let before_ok = actual_pos == 0
+                        || !line
+                            .chars()
+                            .nth(actual_pos - 1)
+                            .unwrap_or(' ')
+                            .is_alphanumeric();
+                    let after_ok = actual_pos + word.len() >= line.len()
+                        || !line
+                            .chars()
+                            .nth(actual_pos + word.len())
+                            .unwrap_or(' ')
+                            .is_alphanumeric();
                     before_ok && after_ok
                 };
 
@@ -242,7 +262,7 @@ impl Handlers {
                         },
                     });
                 }
-                
+
                 start = actual_pos + 1;
             }
         }
@@ -251,9 +271,13 @@ impl Handlers {
     }
 
     /// Extract document symbols (functions, structs, etc.)
-    fn extract_document_symbols(&self, text: &str, uri: &Url) -> Option<Vec<tower_lsp::lsp_types::SymbolInformation>> {
-        use flow_parser::Parser;
+    fn extract_document_symbols(
+        &self,
+        text: &str,
+        uri: &Url,
+    ) -> Option<Vec<tower_lsp::lsp_types::SymbolInformation>> {
         use flow_ast::Item;
+        use flow_parser::Parser;
         use tower_lsp::lsp_types::{SymbolInformation, SymbolKind};
 
         let mut parser = Parser::new(text);
@@ -295,8 +319,14 @@ impl Handlers {
                         location: Location {
                             uri: uri.clone(),
                             range: Range {
-                                start: Position { line: 0, character: 0 }, // Simplified
-                                end: Position { line: 0, character: 0 },
+                                start: Position {
+                                    line: 0,
+                                    character: 0,
+                                }, // Simplified
+                                end: Position {
+                                    line: 0,
+                                    character: 0,
+                                },
                             },
                         },
                         container_name: None,

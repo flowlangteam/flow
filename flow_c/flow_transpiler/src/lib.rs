@@ -6,16 +6,16 @@ use thiserror::Error;
 pub enum TranspilerError {
     #[error("Unsupported feature: {0}")]
     UnsupportedFeature(String),
-    
+
     #[error("Type error: {0}")]
     TypeError(String),
-    
+
     #[error("Name resolution error: {0}")]
     NameResolutionError(String),
-    
+
     #[error("Code generation error: {0}")]
     CodeGenError(String),
-    
+
     #[error("I/O error: {0}")]
     IoError(#[from] std::io::Error),
 }
@@ -26,10 +26,10 @@ pub type Result<T> = std::result::Result<T, TranspilerError>;
 pub trait Transpiler {
     /// The output type (could be bytecode, source code, etc.)
     type Output;
-    
+
     /// Transpile a complete Flow program
     fn transpile(&mut self, program: &Program) -> Result<Self::Output>;
-    
+
     /// Get the target language/platform name
     fn target_name(&self) -> &str;
 }
@@ -64,21 +64,27 @@ impl TranspileContext {
             current_function: None,
         }
     }
-    
+
     pub fn add_function(&mut self, func: &Function) {
         let sig = FunctionSignature {
             name: func.name.clone(),
-            params: func.params.iter().map(|p| (p.name.clone(), p.ty.clone())).collect(),
+            params: func
+                .params
+                .iter()
+                .map(|p| (p.name.clone(), p.ty.clone()))
+                .collect(),
             return_type: func.return_type.clone(),
             is_pub: func.is_pub,
         };
         self.functions.insert(func.name.clone(), sig);
     }
-    
+
     pub fn add_struct(&mut self, struct_def: &Struct) {
         let info = StructInfo {
             name: struct_def.name.clone(),
-            fields: struct_def.fields.iter()
+            fields: struct_def
+                .fields
+                .iter()
                 .map(|f| (f.name.clone(), f.ty.clone(), f.is_pub))
                 .collect(),
         };

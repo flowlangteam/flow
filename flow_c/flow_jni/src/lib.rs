@@ -1,13 +1,13 @@
+use jni::objects::{JClass, JObject, JString};
+use jni::sys::{jdouble, jlong, jstring};
 use jni::JNIEnv;
-use jni::objects::{JClass, JString, JObject};
-use jni::sys::{jlong, jdouble, jstring};
+use std::collections::HashMap;
 use std::ptr;
 use std::sync::Mutex;
-use std::collections::HashMap;
 
-use flow_parser::Parser;
-use flow_codegen::Compiler;
 use flow_ast::Item;
+use flow_compiler::{CompilationTarget, FlowCompilerBuilder};
+use flow_parser::Parser;
 
 // Global state for managing compiled modules
 lazy_static::lazy_static! {
@@ -24,10 +24,7 @@ struct CompiledModule {
 
 /// Initialize the Flow runtime
 #[no_mangle]
-pub extern "system" fn Java_flow_bridge_FlowBridge_initializeRuntime(
-    _env: JNIEnv,
-    _class: JClass,
-) {
+pub extern "system" fn Java_flow_bridge_FlowBridge_initializeRuntime(_env: JNIEnv, _class: JClass) {
     // Runtime initialization if needed
     println!("Flow JNI Runtime initialized");
 }
@@ -43,7 +40,10 @@ pub extern "system" fn Java_flow_bridge_FlowBridge_compileFlow(
     let source_str: String = match env.get_string(&source) {
         Ok(s) => s.into(),
         Err(e) => {
-            let _ = env.throw_new("java/lang/RuntimeException", format!("Failed to get source string: {}", e));
+            let _ = env.throw_new(
+                "java/lang/RuntimeException",
+                format!("Failed to get source string: {}", e),
+            );
             return -1;
         }
     };
@@ -51,7 +51,10 @@ pub extern "system" fn Java_flow_bridge_FlowBridge_compileFlow(
     let name_str: String = match env.get_string(&module_name) {
         Ok(s) => s.into(),
         Err(e) => {
-            let _ = env.throw_new("java/lang/RuntimeException", format!("Failed to get module name: {}", e));
+            let _ = env.throw_new(
+                "java/lang/RuntimeException",
+                format!("Failed to get module name: {}", e),
+            );
             return -1;
         }
     };
@@ -61,7 +64,10 @@ pub extern "system" fn Java_flow_bridge_FlowBridge_compileFlow(
     let ast = match parser.parse() {
         Ok(ast) => ast,
         Err(e) => {
-            let _ = env.throw_new("java/lang/RuntimeException", format!("Parser error: {:?}", e));
+            let _ = env.throw_new(
+                "java/lang/RuntimeException",
+                format!("Parser error: {:?}", e),
+            );
             return -1;
         }
     };
@@ -70,7 +76,10 @@ pub extern "system" fn Java_flow_bridge_FlowBridge_compileFlow(
     let mut compiler = Compiler::new();
 
     if let Err(e) = compiler.compile(&ast) {
-        let _ = env.throw_new("java/lang/RuntimeException", format!("Compilation error: {:?}", e));
+        let _ = env.throw_new(
+            "java/lang/RuntimeException",
+            format!("Compilation error: {:?}", e),
+        );
         return -1;
     }
 
@@ -113,7 +122,10 @@ pub extern "system" fn Java_flow_bridge_FlowBridge_callNativeFunction(
     let func_name: String = match env.get_string(&function_name) {
         Ok(s) => s.into(),
         Err(e) => {
-            let _ = env.throw_new("java/lang/RuntimeException", format!("Failed to get function name: {}", e));
+            let _ = env.throw_new(
+                "java/lang/RuntimeException",
+                format!("Failed to get function name: {}", e),
+            );
             return 0.0;
         }
     };
@@ -123,14 +135,20 @@ pub extern "system" fn Java_flow_bridge_FlowBridge_callNativeFunction(
     let module = match cache.values().find(|m| m.id == module_id as u64) {
         Some(m) => m,
         None => {
-            let _ = env.throw_new("java/lang/RuntimeException", format!("Module not found: {}", module_id));
+            let _ = env.throw_new(
+                "java/lang/RuntimeException",
+                format!("Module not found: {}", module_id),
+            );
             return 0.0;
         }
     };
 
     // Verify function exists
     if !module.functions.contains(&func_name) {
-        let _ = env.throw_new("java/lang/RuntimeException", format!("Function not found: {}", func_name));
+        let _ = env.throw_new(
+            "java/lang/RuntimeException",
+            format!("Function not found: {}", func_name),
+        );
         return 0.0;
     }
 
@@ -138,7 +156,10 @@ pub extern "system" fn Java_flow_bridge_FlowBridge_callNativeFunction(
     let func_ptr = match module.compiler.get_function(&func_name) {
         Some(ptr) => ptr,
         None => {
-            let _ = env.throw_new("java/lang/RuntimeException", format!("Function not compiled: {}", func_name));
+            let _ = env.throw_new(
+                "java/lang/RuntimeException",
+                format!("Function not compiled: {}", func_name),
+            );
             return 0.0;
         }
     };
@@ -146,7 +167,7 @@ pub extern "system" fn Java_flow_bridge_FlowBridge_callNativeFunction(
     // @TODO: Implement full argument marshalling for all types
     // Parse args array (for now, support simple cases)
     // TODO: Implement full argument marshalling
-    
+
     // @TODO: Support functions with parameters - currently assumes no-arg functions
     // Call the function (assuming no-arg for now)
     unsafe {
@@ -166,18 +187,24 @@ pub extern "system" fn Java_flow_bridge_FlowBridge_getFunctions(
     let module = match cache.values().find(|m| m.id == module_id as u64) {
         Some(m) => m,
         None => {
-            let _ = env.throw_new("java/lang/RuntimeException", format!("Module not found: {}", module_id));
+            let _ = env.throw_new(
+                "java/lang/RuntimeException",
+                format!("Module not found: {}", module_id),
+            );
             return ptr::null_mut();
         }
     };
 
     // Join function names with commas
     let functions_list = module.functions.join(",");
-    
+
     match env.new_string(&functions_list) {
         Ok(s) => s.into_raw(),
         Err(e) => {
-            let _ = env.throw_new("java/lang/RuntimeException", format!("Failed to create string: {}", e));
+            let _ = env.throw_new(
+                "java/lang/RuntimeException",
+                format!("Failed to create string: {}", e),
+            );
             ptr::null_mut()
         }
     }
@@ -196,10 +223,7 @@ pub extern "system" fn Java_flow_bridge_FlowBridge_unloadModule(
 
 /// Shutdown the Flow runtime
 #[no_mangle]
-pub extern "system" fn Java_flow_bridge_FlowBridge_shutdownRuntime(
-    _env: JNIEnv,
-    _class: JClass,
-) {
+pub extern "system" fn Java_flow_bridge_FlowBridge_shutdownRuntime(_env: JNIEnv, _class: JClass) {
     let mut cache = MODULE_CACHE.lock().unwrap();
     cache.clear();
     println!("Flow JNI Runtime shut down");

@@ -2,17 +2,17 @@ use crate::analyzer_bridge::AnalyzerBridge;
 use crate::document::DocumentManager;
 use crate::handlers::Handlers;
 use crate::utils::is_flow_file;
-use tower_lsp::lsp_types::{
-    CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
-    DidCloseTextDocumentParams, DidOpenTextDocumentParams, GotoDefinitionParams,
-    GotoDefinitionResponse, Hover, HoverParams, HoverProviderCapability, InitializeParams,
-    InitializeResult, InitializedParams, MessageType, ReferenceParams,
-    ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind,
-    DocumentSymbolParams, DocumentSymbolResponse,
-};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tower_lsp::{jsonrpc::Result, Client, LanguageServer, LspService, Server};
+use tower_lsp::lsp_types::{
+    CompletionOptions, CompletionParams, CompletionResponse, DidChangeTextDocumentParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentSymbolParams,
+    DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams,
+    HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams, MessageType,
+    ReferenceParams, ServerCapabilities, ServerInfo, TextDocumentSyncCapability,
+    TextDocumentSyncKind,
+};
+use tower_lsp::{Client, LanguageServer, LspService, Server, jsonrpc::Result};
 
 pub struct FlowLanguageServer {
     client: Client,
@@ -49,7 +49,9 @@ impl FlowLanguageServer {
     /// Publish diagnostics for a document
     async fn publish_diagnostics_for_document(&self, uri: tower_lsp::lsp_types::Url) {
         if let Some(diagnostics) = self.handlers.publish_diagnostics(&uri).await {
-            self.client.publish_diagnostics(uri, diagnostics, None).await;
+            self.client
+                .publish_diagnostics(uri, diagnostics, None)
+                .await;
         }
     }
 }
@@ -58,17 +60,19 @@ impl FlowLanguageServer {
 impl LanguageServer for FlowLanguageServer {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
         tracing::info!("Initializing Flow Language Server");
-        
+
         // Log client info
         if let Some(client_info) = params.client_info {
-            tracing::info!("Client: {} {}", client_info.name, client_info.version.unwrap_or_default());
+            tracing::info!(
+                "Client: {} {}",
+                client_info.name,
+                client_info.version.unwrap_or_default()
+            );
         }
 
         let server_capabilities = ServerCapabilities {
             // Text document synchronization
-            text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                TextDocumentSyncKind::FULL,
-            )),
+            text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
 
             // Hover support
             hover_provider: Some(HoverProviderCapability::Simple(true)),
@@ -118,7 +122,7 @@ impl LanguageServer for FlowLanguageServer {
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
         let uri = params.text_document.uri.clone();
-        
+
         tracing::info!("Document opened: {}", uri);
 
         if is_flow_file(&uri) {
@@ -137,7 +141,7 @@ impl LanguageServer for FlowLanguageServer {
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri.clone();
-        
+
         tracing::debug!("Document changed: {}", uri);
 
         if is_flow_file(&uri) {
@@ -158,7 +162,7 @@ impl LanguageServer for FlowLanguageServer {
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
-        
+
         tracing::info!("Document closed: {}", uri);
 
         if is_flow_file(&uri) {
@@ -171,7 +175,8 @@ impl LanguageServer for FlowLanguageServer {
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
-        tracing::debug!("Completion request at {}:{}", 
+        tracing::debug!(
+            "Completion request at {}:{}",
             params.text_document_position.position.line,
             params.text_document_position.position.character
         );
@@ -180,7 +185,8 @@ impl LanguageServer for FlowLanguageServer {
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
-        tracing::debug!("Hover request at {}:{}", 
+        tracing::debug!(
+            "Hover request at {}:{}",
             params.text_document_position_params.position.line,
             params.text_document_position_params.position.character
         );
@@ -188,8 +194,12 @@ impl LanguageServer for FlowLanguageServer {
         Ok(self.handlers.hover(params).await)
     }
 
-    async fn goto_definition(&self, params: GotoDefinitionParams) -> Result<Option<GotoDefinitionResponse>> {
-        tracing::debug!("Go to definition request at {}:{}", 
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        tracing::debug!(
+            "Go to definition request at {}:{}",
             params.text_document_position_params.position.line,
             params.text_document_position_params.position.character
         );
@@ -197,8 +207,12 @@ impl LanguageServer for FlowLanguageServer {
         Ok(self.handlers.goto_definition(params).await)
     }
 
-    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<tower_lsp::lsp_types::Location>>> {
-        tracing::debug!("Find references request at {}:{}", 
+    async fn references(
+        &self,
+        params: ReferenceParams,
+    ) -> Result<Option<Vec<tower_lsp::lsp_types::Location>>> {
+        tracing::debug!(
+            "Find references request at {}:{}",
             params.text_document_position.position.line,
             params.text_document_position.position.character
         );
@@ -206,7 +220,10 @@ impl LanguageServer for FlowLanguageServer {
         Ok(self.handlers.find_references(params).await)
     }
 
-    async fn document_symbol(&self, params: DocumentSymbolParams) -> Result<Option<DocumentSymbolResponse>> {
+    async fn document_symbol(
+        &self,
+        params: DocumentSymbolParams,
+    ) -> Result<Option<DocumentSymbolResponse>> {
         tracing::debug!("Document symbol request for {}", params.text_document.uri);
 
         Ok(self.handlers.document_symbols(params).await)

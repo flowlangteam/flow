@@ -1,7 +1,7 @@
 use anyhow::Result;
 use dashmap::DashMap;
-use tower_lsp::lsp_types::{Position, Range, TextDocumentContentChangeEvent, Url};
 use ropey::Rope;
+use tower_lsp::lsp_types::{Position, Range, TextDocumentContentChangeEvent, Url};
 
 /// Represents a document tracked by the LSP server
 #[derive(Debug, Clone)]
@@ -29,7 +29,7 @@ impl Document {
                 // Incremental change
                 let start_offset = self.position_to_offset(&range.start)?;
                 let end_offset = self.position_to_offset(&range.end)?;
-                
+
                 // Replace the text in the range
                 self.text.remove(start_offset..end_offset);
                 self.text.insert(start_offset, &change.text);
@@ -58,15 +58,15 @@ impl Document {
     pub fn position_to_offset(&self, position: &Position) -> Result<usize> {
         let line_idx = position.line as usize;
         let char_idx = position.character as usize;
-        
+
         if line_idx >= self.text.len_lines() {
             return Ok(self.text.len_chars());
         }
-        
+
         let line_start = self.text.line_to_char(line_idx);
         let line = self.text.line(line_idx);
         let line_len = line.len_chars().saturating_sub(1); // Subtract newline
-        
+
         let char_offset = char_idx.min(line_len);
         Ok(line_start + char_offset)
     }
@@ -77,7 +77,7 @@ impl Document {
         let line_idx = self.text.char_to_line(char_idx);
         let line_start = self.text.line_to_char(line_idx);
         let character = char_idx - line_start;
-        
+
         Position {
             line: line_idx as u32,
             character: character as u32,
@@ -89,29 +89,29 @@ impl Document {
         let offset = self.position_to_offset(position).ok()?;
         let text = self.get_text();
         let chars: Vec<char> = text.chars().collect();
-        
+
         if offset >= chars.len() {
             return None;
         }
-        
+
         // Find word boundaries
         let mut start = offset;
         let mut end = offset;
-        
+
         // Move start backwards to find word start
         while start > 0 && (chars[start - 1].is_alphanumeric() || chars[start - 1] == '_') {
             start -= 1;
         }
-        
+
         // Move end forwards to find word end
         while end < chars.len() && (chars[end].is_alphanumeric() || chars[end] == '_') {
             end += 1;
         }
-        
+
         if start == end {
             return None;
         }
-        
+
         Some(chars[start..end].iter().collect())
     }
 }
@@ -163,7 +163,10 @@ impl DocumentManager {
 
     /// Get all document URIs
     pub fn get_all_uris(&self) -> Vec<Url> {
-        self.documents.iter().map(|entry| entry.key().clone()).collect()
+        self.documents
+            .iter()
+            .map(|entry| entry.key().clone())
+            .collect()
     }
 }
 

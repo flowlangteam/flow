@@ -146,21 +146,21 @@ pub enum Instruction {
     FConst(f32),
     DConst(f64),
     Ldc(ConstantValue),
-    
+
     // Loads
     ILoad(u16),
     LLoad(u16),
     FLoad(u16),
     DLoad(u16),
     ALoad(u16),
-    
+
     // Stores
     IStore(u16),
     LStore(u16),
     FStore(u16),
     DStore(u16),
     AStore(u16),
-    
+
     // Arithmetic
     IAdd,
     LAdd,
@@ -186,16 +186,16 @@ pub enum Instruction {
     LNeg,
     FNeg,
     DNeg,
-    
+
     // Bitwise
     IAnd,
     LAnd,
     IOr,
     LOr,
-    
+
     // Comparisons
     LCmp,
-    
+
     // Conditional branches
     IfEq(i16),
     IfNe(i16),
@@ -209,10 +209,10 @@ pub enum Instruction {
     IfICmpGe(i16),
     IfICmpGt(i16),
     IfICmpLe(i16),
-    
+
     // Unconditional branch
     Goto(i16),
-    
+
     // Returns
     IReturn,
     LReturn,
@@ -220,18 +220,18 @@ pub enum Instruction {
     DReturn,
     AReturn,
     Return,
-    
+
     // Method invocation
     InvokeVirtual(String, String, String), // class, method, descriptor
     InvokeSpecial(String, String, String),
     InvokeStatic(String, String, String),
-    
+
     // Field access
     GetStatic(String, String, String), // class, field, descriptor
     PutStatic(String, String, String),
     GetField(String, String, String),
     PutField(String, String, String),
-    
+
     // Object creation
     New(String),
 }
@@ -248,16 +248,16 @@ impl CodeBuilder {
             offsets: Vec::new(),
         }
     }
-    
+
     pub fn add_instruction(&mut self, instr: Instruction) {
         self.offsets.push(self.current_offset());
         self.instructions.push(instr);
     }
-    
+
     pub fn instruction_count(&self) -> usize {
         self.instructions.len()
     }
-    
+
     pub fn current_offset(&self) -> usize {
         let mut offset = 0;
         for instr in &self.instructions {
@@ -265,7 +265,7 @@ impl CodeBuilder {
         }
         offset
     }
-    
+
     pub fn patch_jump(&mut self, index: usize, target_offset: i16) {
         if let Some(instr) = self.instructions.get_mut(index) {
             match instr {
@@ -288,7 +288,7 @@ impl CodeBuilder {
             }
         }
     }
-    
+
     pub fn build(self) -> Vec<Instruction> {
         self.instructions
     }
@@ -299,29 +299,71 @@ fn instruction_size(instr: &Instruction) -> usize {
         Instruction::IConst(_) => 2,
         Instruction::LConst(_) => 1,
         Instruction::Ldc(_) => 2,
-        Instruction::ILoad(_) | Instruction::LLoad(_) | Instruction::FLoad(_)
-        | Instruction::DLoad(_) | Instruction::ALoad(_) => 2,
-        Instruction::IStore(_) | Instruction::LStore(_) | Instruction::FStore(_)
-        | Instruction::DStore(_) | Instruction::AStore(_) => 2,
-        Instruction::IAdd | Instruction::LAdd | Instruction::FAdd | Instruction::DAdd
-        | Instruction::ISub | Instruction::LSub | Instruction::FSub | Instruction::DSub
-        | Instruction::IMul | Instruction::LMul | Instruction::FMul | Instruction::DMul
-        | Instruction::IDiv | Instruction::LDiv | Instruction::FDiv | Instruction::DDiv
-        | Instruction::IRem | Instruction::LRem | Instruction::FRem | Instruction::DRem
-        | Instruction::INeg | Instruction::LNeg | Instruction::FNeg | Instruction::DNeg
-        | Instruction::IAnd | Instruction::LAnd | Instruction::IOr | Instruction::LOr => 1,
+        Instruction::ILoad(_)
+        | Instruction::LLoad(_)
+        | Instruction::FLoad(_)
+        | Instruction::DLoad(_)
+        | Instruction::ALoad(_) => 2,
+        Instruction::IStore(_)
+        | Instruction::LStore(_)
+        | Instruction::FStore(_)
+        | Instruction::DStore(_)
+        | Instruction::AStore(_) => 2,
+        Instruction::IAdd
+        | Instruction::LAdd
+        | Instruction::FAdd
+        | Instruction::DAdd
+        | Instruction::ISub
+        | Instruction::LSub
+        | Instruction::FSub
+        | Instruction::DSub
+        | Instruction::IMul
+        | Instruction::LMul
+        | Instruction::FMul
+        | Instruction::DMul
+        | Instruction::IDiv
+        | Instruction::LDiv
+        | Instruction::FDiv
+        | Instruction::DDiv
+        | Instruction::IRem
+        | Instruction::LRem
+        | Instruction::FRem
+        | Instruction::DRem
+        | Instruction::INeg
+        | Instruction::LNeg
+        | Instruction::FNeg
+        | Instruction::DNeg
+        | Instruction::IAnd
+        | Instruction::LAnd
+        | Instruction::IOr
+        | Instruction::LOr => 1,
         Instruction::LCmp => 1,
-        Instruction::IfEq(_) | Instruction::IfNe(_) | Instruction::IfLt(_)
-        | Instruction::IfGe(_) | Instruction::IfGt(_) | Instruction::IfLe(_)
-        | Instruction::IfICmpEq(_) | Instruction::IfICmpNe(_) | Instruction::IfICmpLt(_)
-        | Instruction::IfICmpGe(_) | Instruction::IfICmpGt(_) | Instruction::IfICmpLe(_) => 3,
+        Instruction::IfEq(_)
+        | Instruction::IfNe(_)
+        | Instruction::IfLt(_)
+        | Instruction::IfGe(_)
+        | Instruction::IfGt(_)
+        | Instruction::IfLe(_)
+        | Instruction::IfICmpEq(_)
+        | Instruction::IfICmpNe(_)
+        | Instruction::IfICmpLt(_)
+        | Instruction::IfICmpGe(_)
+        | Instruction::IfICmpGt(_)
+        | Instruction::IfICmpLe(_) => 3,
         Instruction::Goto(_) => 3,
-        Instruction::IReturn | Instruction::LReturn | Instruction::FReturn
-        | Instruction::DReturn | Instruction::AReturn | Instruction::Return => 1,
-        Instruction::InvokeVirtual(_, _, _) | Instruction::InvokeSpecial(_, _, _)
+        Instruction::IReturn
+        | Instruction::LReturn
+        | Instruction::FReturn
+        | Instruction::DReturn
+        | Instruction::AReturn
+        | Instruction::Return => 1,
+        Instruction::InvokeVirtual(_, _, _)
+        | Instruction::InvokeSpecial(_, _, _)
         | Instruction::InvokeStatic(_, _, _) => 3,
-        Instruction::GetStatic(_, _, _) | Instruction::PutStatic(_, _, _)
-        | Instruction::GetField(_, _, _) | Instruction::PutField(_, _, _) => 3,
+        Instruction::GetStatic(_, _, _)
+        | Instruction::PutStatic(_, _, _)
+        | Instruction::GetField(_, _, _)
+        | Instruction::PutField(_, _, _) => 3,
         Instruction::New(_) => 3,
         _ => 1,
     }

@@ -1,5 +1,5 @@
-use tower_lsp::lsp_types::{Position, Range, Url};
 use std::path::Path;
+use tower_lsp::lsp_types::{Position, Range, Url};
 
 /// Convert a file path to a URI
 pub fn path_to_uri(path: &Path) -> Url {
@@ -38,15 +38,15 @@ pub fn position_in_range(position: &Position, range: &Range) -> bool {
     if position.line < range.start.line || position.line > range.end.line {
         return false;
     }
-    
+
     if position.line == range.start.line && position.character < range.start.character {
         return false;
     }
-    
+
     if position.line == range.end.line && position.character > range.end.character {
         return false;
     }
-    
+
     true
 }
 
@@ -54,12 +54,12 @@ pub fn position_in_range(position: &Position, range: &Range) -> bool {
 pub fn offset_to_line_col(text: &str, offset: usize) -> (u32, u32) {
     let mut line = 0;
     let mut col = 0;
-    
+
     for (i, ch) in text.char_indices() {
         if i >= offset {
             break;
         }
-        
+
         if ch == '\n' {
             line += 1;
             col = 0;
@@ -67,7 +67,7 @@ pub fn offset_to_line_col(text: &str, offset: usize) -> (u32, u32) {
             col += 1;
         }
     }
-    
+
     (line, col)
 }
 
@@ -75,12 +75,12 @@ pub fn offset_to_line_col(text: &str, offset: usize) -> (u32, u32) {
 pub fn line_col_to_offset(text: &str, target_line: u32, target_col: u32) -> Option<usize> {
     let mut line = 0;
     let mut col = 0;
-    
+
     for (i, ch) in text.char_indices() {
         if line == target_line && col == target_col {
             return Some(i);
         }
-        
+
         if ch == '\n' {
             line += 1;
             col = 0;
@@ -88,7 +88,7 @@ pub fn line_col_to_offset(text: &str, target_line: u32, target_col: u32) -> Opti
             col += 1;
         }
     }
-    
+
     // Handle end of file
     if line == target_line && col == target_col {
         Some(text.len())
@@ -127,20 +127,50 @@ mod tests {
     #[test]
     fn test_position_in_range() {
         let range = create_range(1, 5, 3, 10);
-        
+
         // Position before range
-        assert!(!position_in_range(&Position { line: 0, character: 0 }, &range));
-        
+        assert!(!position_in_range(
+            &Position {
+                line: 0,
+                character: 0
+            },
+            &range
+        ));
+
         // Position at start of range
-        assert!(position_in_range(&Position { line: 1, character: 5 }, &range));
-        
+        assert!(position_in_range(
+            &Position {
+                line: 1,
+                character: 5
+            },
+            &range
+        ));
+
         // Position inside range
-        assert!(position_in_range(&Position { line: 2, character: 0 }, &range));
-        
+        assert!(position_in_range(
+            &Position {
+                line: 2,
+                character: 0
+            },
+            &range
+        ));
+
         // Position at end of range
-        assert!(position_in_range(&Position { line: 3, character: 10 }, &range));
-        
+        assert!(position_in_range(
+            &Position {
+                line: 3,
+                character: 10
+            },
+            &range
+        ));
+
         // Position after range
-        assert!(!position_in_range(&Position { line: 4, character: 0 }, &range));
+        assert!(!position_in_range(
+            &Position {
+                line: 4,
+                character: 0
+            },
+            &range
+        ));
     }
 }

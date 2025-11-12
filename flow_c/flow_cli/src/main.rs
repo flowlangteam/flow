@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 use console::style;
-use flow_codegen::{Compiler, AOTCompiler};
+use flow_compiler::{CompilationTarget, CompilerConfig, FlowCompilerBuilder};
 use flow_parser::Parser as FlowParser;
 use flow_transpiler::Transpiler;
 use flow_transpiler_java::JavaTranspiler;
@@ -10,11 +10,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
 
-mod module_manager;
 mod error_reporter;
 
-use module_manager::ModuleManager;
-use error_reporter::{ErrorReporter, RichError, ErrorSpan, SpanStyle, Suggestion};
+use error_reporter::{ErrorReporter, ErrorSpan, RichError, SpanStyle, Suggestion};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -130,12 +128,7 @@ fn main() {
     }
 }
 
-fn run_file(
-    path: &PathBuf,
-    show_stats: bool,
-    verbose: bool,
-    quiet: bool,
-) -> Result<(), String> {
+fn run_file(path: &PathBuf, show_stats: bool, verbose: bool, quiet: bool) -> Result<(), String> {
     let start_time = Instant::now();
 
     if !quiet {
@@ -150,11 +143,7 @@ fn run_file(
     let source = fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
 
     if verbose {
-        println!(
-            "  {} Read {} bytes",
-            "ℹ".blue(),
-            style(source.len()).cyan()
-        );
+        println!("  {} Read {} bytes", "ℹ".blue(), style(source.len()).cyan());
     }
 
     // Parsing with rich error reporting
@@ -167,11 +156,11 @@ fn run_file(
         }
         Err(e) => {
             spinner.finish_and_clear();
-            
+
             // Use rich error reporting for parse errors
             let rich_error = parse_error_to_rich(&e, &path.to_string_lossy(), &source);
             display_rich_errors(&[rich_error], &path.to_string_lossy(), &source);
-            
+
             return Err("Parse failed".to_string());
         }
     };
@@ -185,44 +174,28 @@ fn run_file(
     }
 
     // Analyzing and compiling
-    let spinner = create_spinner("Analyzing dependencies...", quiet);
-    let mut module_manager = ModuleManager::new();
-    
-    // Set source context for better error spans
-    module_manager.set_source_context(source.clone(), path.to_string_lossy().to_string());
-    
-    // Add the directory containing the input file as a search path
-    if let Some(parent_dir) = path.parent() {
-        module_manager.add_module_search_path(parent_dir.to_path_buf());
-    }
-    
-    let code_ptr = match module_manager.compile_program(&program) {
-        Ok(ptr) => {
+    let spinner = create_spinner("Compiling with JIT...", quiet);
+
+    // Create compiler using the unified API
+    let mut compiler = FlowCompilerBuilder::new()
+        .target(CompilationTarget::Jit)
+        .optimization_level(0)
+        .debug_info(verbose)
+        .build()
+        .map_err(|e| format!("Failed to create compiler: {}", e))?;
+
+    let config = CompilerConfig::new(CompilationTarget::Jit);
+
+    let result = match compiler.compile_program(&program, &config) {
+        Ok(result) => {
             spinner.finish_and_clear();
-            ptr
+            result
         }
-        Err((error_msg, analysis_errors)) => {
+        Err(e) => {
             spinner.finish_and_clear();
-            
-            if let Some(errors) = analysis_errors {
-                // Use rich error reporting for analysis errors
-                let rich_errors = analysis_errors_to_rich(&errors, &path.to_string_lossy());
-                display_rich_errors(&rich_errors, &path.to_string_lossy(), &source);
-            } else {
-                eprintln!("Compilation error: {}", error_msg);
-            }
-            
-            return Err("Compilation failed".to_string());
+            return Err(format!("Compilation failed: {}", e));
         }
     };
-
-    // Show any warnings
-    let warnings = module_manager.get_warnings();
-    if !warnings.is_empty() && !quiet {
-        for warning in warnings {
-            println!("  {} {:?}", "⚠".yellow().bold(), warning);
-        }
-    }
 
     if !quiet {
         println!("  {} Compiled successfully", "✓".green().bold());
@@ -231,26 +204,35 @@ fn run_file(
     }
 
     // Execute the main function
-    type MainFunc = extern "C" fn() -> i64;
-    let main_func: MainFunc = unsafe { std::mem::transmute(code_ptr) };
-    let result = main_func();
+    if let flow_compiler::CompilerOutput::Jit(any_func) = result {
+        // Extract the function pointer from the Any box
+        let code_ptr = any_func
+            .downcast_ref::<*const u8>()
+            .ok_or("Failed to extract function pointer from JIT result")?;
 
-    if !quiet {
-        println!("{}", "─".repeat(70));
-        println!(
-            "\n{} Program exited with code: {}",
-            "✓".green().bold(),
-            style(result).cyan()
-        );
+        type MainFunc = extern "C" fn() -> i64;
+        let main_func: MainFunc = unsafe { std::mem::transmute(*code_ptr) };
+        let result = main_func();
 
-        if show_stats {
-            let elapsed = start_time.elapsed();
+        if !quiet {
+            println!("{}", "─".repeat(70));
             println!(
-                "  {} Total time: {:.2}ms",
-                "ℹ".blue(),
-                elapsed.as_secs_f64() * 1000.0
+                "\n{} Program exited with code: {}",
+                "✓".green().bold(),
+                style(result).cyan()
             );
+
+            if show_stats {
+                let elapsed = start_time.elapsed();
+                println!(
+                    "  {} Total time: {:.2}ms",
+                    "ℹ".blue(),
+                    style(elapsed.as_millis()).cyan()
+                );
+            }
         }
+    } else {
+        return Err("Expected function pointer from JIT compilation".to_string());
     }
 
     Ok(())
@@ -279,16 +261,11 @@ fn build_file(
 
     // Reading file
     let spinner = create_spinner("Reading source file...", quiet);
-    let source =
-        fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
+    let source = fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
     spinner.finish_and_clear();
 
     if verbose {
-        println!(
-            "  {} Read {} bytes",
-            "ℹ".blue(),
-            style(source.len()).cyan()
-        );
+        println!("  {} Read {} bytes", "ℹ".blue(), style(source.len()).cyan());
     }
 
     // Parsing
@@ -311,39 +288,49 @@ fn build_file(
         );
     }
 
-    // Analyzing and compiling with module support
-    let spinner = create_spinner("Analyzing dependencies...", quiet);
-    let mut module_manager = ModuleManager::new();
-    
-    // Add the directory containing the input file as a search path
-    if let Some(parent_dir) = path.parent() {
-        module_manager.add_module_search_path(parent_dir.to_path_buf());
-    }
-    
-    module_manager.compile_program(&program).map_err(|(error_msg, _)| {
-        spinner.finish_and_clear();
-        format!("Compilation error: {}", error_msg)
-    })?;
-    spinner.finish_and_clear();
+    // Compilation with the unified compiler
+    let spinner = create_spinner("Compiling to native code...", quiet);
+
+    // Create AOT compiler
+    let mut compiler = FlowCompilerBuilder::new()
+        .target(CompilationTarget::Native)
+        .optimization_level(if release { 2 } else { 0 })
+        .debug_info(verbose)
+        .build()
+        .map_err(|e| format!("Failed to create compiler: {}", e))?;
+
+    let config = CompilerConfig::new(CompilationTarget::Native);
+
+    let result = match compiler.compile_program(&program, &config) {
+        Ok(result) => {
+            spinner.finish_and_clear();
+            result
+        }
+        Err(e) => {
+            spinner.finish_and_clear();
+            return Err(format!("Compilation failed: {}", e));
+        }
+    };
 
     if !quiet {
         println!("  {} Compiled successfully", "✓".green().bold());
     }
 
-    // AOT compilation
-    let spinner = create_spinner("Generating native code...", quiet);
-    let aot_compiler = AOTCompiler::new();
-    let object_code = aot_compiler.compile_to_object(&program).map_err(|e| {
-        spinner.finish_and_clear();
-        format!("AOT compilation error: {}", e)
-    })?;
-    spinner.finish_and_clear();
+    // Extract object code
+    let object_code = match result {
+        flow_compiler::CompilerOutput::Object(bytes) => bytes,
+        _ => return Err("Expected object code from AOT compilation".to_string()),
+    };
 
     if !quiet {
-        println!("  {} Generated object code", "✓".green().bold());
+        println!(
+            "  {} Generated object code ({} bytes)",
+            "✓".green().bold(),
+            object_code.len()
+        );
     }
 
-    // Linking
+    // Determine output name
     let output_name = output.unwrap_or_else(|| {
         path.file_stem()
             .unwrap()
@@ -352,10 +339,11 @@ fn build_file(
             .into()
     });
 
-    let spinner = create_spinner("Linking executable...", quiet);
-    AOTCompiler::generate_executable(&object_code, &output_name.to_string_lossy()).map_err(|e| {
+    // Write object code to file (for now, since linking is not fully implemented)
+    let spinner = create_spinner("Writing executable...", quiet);
+    fs::write(&output_name, &object_code).map_err(|e| {
         spinner.finish_and_clear();
-        format!("Linking error: {}", e)
+        format!("Failed to write output: {}", e)
     })?;
     spinner.finish_and_clear();
 
@@ -418,8 +406,11 @@ fn transpile_file(
     }
 
     // Transpiling
-    let spinner = create_spinner(&format!("Transpiling to {}...", target.to_uppercase()), quiet);
-    
+    let spinner = create_spinner(
+        &format!("Transpiling to {}...", target.to_uppercase()),
+        quiet,
+    );
+
     let output_bytes = match target.to_lowercase().as_str() {
         "java" | "jvm" | "bytecode" => {
             let class_name = class_name.unwrap_or_else(|| {
@@ -430,11 +421,9 @@ fn transpile_file(
                     .next()
                     .map(|c| c.to_uppercase().to_string())
                     .unwrap_or_else(|| "Main".to_string())
-                    + &path.file_stem()
-                        .unwrap()
-                        .to_string_lossy()[1..]
+                    + &path.file_stem().unwrap().to_string_lossy()[1..]
             });
-            
+
             let mut transpiler = JavaTranspiler::new(&class_name);
             transpiler.transpile(&program).map_err(|e| {
                 spinner.finish_and_clear();
@@ -468,10 +457,13 @@ fn transpile_file(
         }
         _ => {
             spinner.finish_and_clear();
-            return Err(format!("Unknown target language: {}. Supported targets: java, python, javascript, c, rust, wasm", target));
+            return Err(format!(
+                "Unknown target language: {}. Supported targets: java, python, javascript, c, rust, wasm",
+                target
+            ));
         }
     };
-    
+
     spinner.finish_and_clear();
 
     if !quiet {
@@ -494,8 +486,7 @@ fn transpile_file(
     });
 
     let spinner = create_spinner("Writing output...", quiet);
-    fs::write(&output_path, output_bytes)
-        .map_err(|e| format!("Failed to write output: {}", e))?;
+    fs::write(&output_path, output_bytes).map_err(|e| format!("Failed to write output: {}", e))?;
     spinner.finish_and_clear();
 
     if !quiet {
@@ -512,7 +503,10 @@ fn transpile_file(
         println!("\n{}", style("Statistics:").bold().underlined());
         println!("  Total time:   {:?}", total_time);
         println!("  Source size:  {} bytes", source.len());
-        println!("  Output size:  {} bytes", fs::metadata(&output_path).unwrap().len());
+        println!(
+            "  Output size:  {} bytes",
+            fs::metadata(&output_path).unwrap().len()
+        );
         println!("  AST items:    {}", program.items.len());
         println!("  Target:       {}", target.to_uppercase());
     }
@@ -520,12 +514,7 @@ fn transpile_file(
     Ok(())
 }
 
-fn check_file(
-    path: &PathBuf,
-    show_ast: bool,
-    verbose: bool,
-    quiet: bool,
-) -> Result<(), String> {
+fn check_file(path: &PathBuf, show_ast: bool, verbose: bool, quiet: bool) -> Result<(), String> {
     if !quiet {
         println!(
             "{} Checking {}",
@@ -535,8 +524,7 @@ fn check_file(
     }
 
     let spinner = create_spinner("Reading source file...", quiet);
-    let source =
-        fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
+    let source = fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
     spinner.finish_and_clear();
 
     let spinner = create_spinner("Parsing...", quiet);
@@ -567,11 +555,7 @@ fn check_file(
     Ok(())
 }
 
-fn start_repl(
-    show_ast: bool,
-    _verbose: bool,
-    quiet: bool,
-) -> Result<(), String> {
+fn start_repl(show_ast: bool, _verbose: bool, quiet: bool) -> Result<(), String> {
     if !quiet {
         println!(
             "{} {}",
@@ -617,14 +601,38 @@ fn start_repl(
                     println!("{:#?}", program);
                 }
 
-                let mut module_manager = ModuleManager::new();
-                match module_manager.compile_program(&program) {
-                    Ok(code_ptr) => {
-                        let main_fn: fn() -> i64 = unsafe { std::mem::transmute(code_ptr) };
-                        let result = main_fn();
-                        println!("{} {}", "=>".green().bold(), style(result).cyan());
+                // Create a simple compiler for the REPL
+                let mut compiler = FlowCompilerBuilder::new()
+                    .target(CompilationTarget::Jit)
+                    .optimization_level(0)
+                    .debug_info(false)
+                    .build()
+                    .map_err(|e| format!("Failed to create compiler: {}", e));
+
+                match compiler {
+                    Ok(mut compiler) => {
+                        let config = CompilerConfig::new(CompilationTarget::Jit);
+                        match compiler.compile_program(&program, &config) {
+                            Ok(flow_compiler::CompilerOutput::Jit(any_func)) => {
+                                if let Some(code_ptr) = any_func.downcast_ref::<*const u8>() {
+                                    let main_fn: fn() -> i64 =
+                                        unsafe { std::mem::transmute(*code_ptr) };
+                                    let result = main_fn();
+                                    println!("{} {}", "=>".green().bold(), style(result).cyan());
+                                } else {
+                                    eprintln!(
+                                        "{} Failed to extract function pointer",
+                                        "✗".red().bold()
+                                    );
+                                }
+                            }
+                            Ok(_) => {
+                                eprintln!("{} Unexpected compiler output type", "✗".red().bold())
+                            }
+                            Err(e) => eprintln!("{} {}", "✗".red().bold(), e.to_string().red()),
+                        }
                     }
-                    Err((error_msg, _)) => eprintln!("{} {}", "✗".red().bold(), error_msg.red()),
+                    Err(e) => eprintln!("{} {}", "✗".red().bold(), e.red()),
                 }
             }
             Err(e) => eprintln!("{} {}", "✗".red().bold(), e.message.red()),
@@ -655,9 +663,13 @@ fn create_spinner(msg: &str, quiet: bool) -> ProgressBar {
 }
 
 /// Convert a parse error to a rich error with suggestions
-fn parse_error_to_rich(error: &flow_parser::ParseError, file_path: &str, source: &str) -> RichError {
+fn parse_error_to_rich(
+    error: &flow_parser::ParseError,
+    file_path: &str,
+    source: &str,
+) -> RichError {
     let mut suggestions = Vec::new();
-    
+
     // Add specific suggestions based on the error message
     if error.message.contains("Expected identifier") {
         suggestions.push(Suggestion {
@@ -675,7 +687,7 @@ fn parse_error_to_rich(error: &flow_parser::ParseError, file_path: &str, source:
             replacements: vec![],
         });
     }
-    
+
     RichError {
         title: error.message.clone(),
         code: Some("E0001".to_string()),
@@ -693,54 +705,67 @@ fn parse_error_to_rich(error: &flow_parser::ParseError, file_path: &str, source:
 }
 
 /// Convert analysis errors to rich errors with suggestions
-fn analysis_errors_to_rich(errors: &[flow_analyzer::AnalysisError], file_path: &str) -> Vec<RichError> {
-    errors.iter().map(|error| {
-        let mut suggestions = Vec::new();
-        let mut notes = Vec::new();
-        
-        // Add specific suggestions based on the error message
-        if error.message.contains("Undefined function") {
-            if let Some(func_name) = extract_function_name(&error.message) {
+fn analysis_errors_to_rich(
+    errors: &[flow_analyzer::AnalysisError],
+    file_path: &str,
+) -> Vec<RichError> {
+    errors
+        .iter()
+        .map(|error| {
+            let mut suggestions = Vec::new();
+            let mut notes = Vec::new();
+
+            // Add specific suggestions based on the error message
+            if error.message.contains("Undefined function") {
+                if let Some(func_name) = extract_function_name(&error.message) {
+                    suggestions.push(Suggestion {
+                        message: format!("make sure '{}' is defined or imported", func_name),
+                        replacements: vec![],
+                    });
+                    notes.push(
+                        "functions must be declared before use, or imported from a module"
+                            .to_string(),
+                    );
+                }
+            } else if error.message.contains("returns") && error.message.contains("but expected") {
                 suggestions.push(Suggestion {
-                    message: format!("make sure '{}' is defined or imported", func_name),
+                    message: "make sure the return type matches the function signature".to_string(),
                     replacements: vec![],
                 });
-                notes.push("functions must be declared before use, or imported from a module".to_string());
+            } else if error.message.contains("Module file not found") {
+                suggestions.push(Suggestion {
+                    message: "check the module path and ensure the file exists".to_string(),
+                    replacements: vec![],
+                });
+                notes.push("modules should be in the same directory or a subdirectory".to_string());
             }
-        } else if error.message.contains("returns") && error.message.contains("but expected") {
-            suggestions.push(Suggestion {
-                message: "make sure the return type matches the function signature".to_string(),
-                replacements: vec![],
-            });
-        } else if error.message.contains("Module file not found") {
-            suggestions.push(Suggestion {
-                message: "check the module path and ensure the file exists".to_string(),
-                replacements: vec![],
-            });
-            notes.push("modules should be in the same directory or a subdirectory".to_string());
-        }
-        
-        let code = match error.severity {
-            flow_analyzer::Severity::Error => "E0002",
-            flow_analyzer::Severity::Warning => "W0001",
-            _ => "I0001",
-        };
-        
-        RichError {
-            title: error.message.clone(),
-            code: Some(code.to_string()),
-            primary_span: ErrorSpan {
-                start: error.span.start,
-                end: error.span.end,
-                file: error.span.file.clone().or_else(|| Some(file_path.to_string())),
-                label: Some("error occurred here".to_string()),
-                style: SpanStyle::Primary,
-            },
-            secondary_spans: vec![],
-            suggestions,
-            notes,
-        }
-    }).collect()
+
+            let code = match error.severity {
+                flow_analyzer::Severity::Error => "E0002",
+                flow_analyzer::Severity::Warning => "W0001",
+                _ => "I0001",
+            };
+
+            RichError {
+                title: error.message.clone(),
+                code: Some(code.to_string()),
+                primary_span: ErrorSpan {
+                    start: error.span.start,
+                    end: error.span.end,
+                    file: error
+                        .span
+                        .file
+                        .clone()
+                        .or_else(|| Some(file_path.to_string())),
+                    label: Some("error occurred here".to_string()),
+                    style: SpanStyle::Primary,
+                },
+                secondary_spans: vec![],
+                suggestions,
+                notes,
+            }
+        })
+        .collect()
 }
 
 /// Extract function name from error message
@@ -757,7 +782,7 @@ fn extract_function_name(message: &str) -> Option<String> {
 fn display_rich_errors(errors: &[RichError], file_path: &str, source: &str) {
     let mut reporter = ErrorReporter::new();
     reporter.load_file(file_path.to_string(), source.to_string());
-    
+
     for error in errors {
         print!("{}", reporter.display_error(error));
     }

@@ -92,24 +92,24 @@ pub enum Type {
     I32,
     I64,
     I128,
-    
+
     // Unsigned integers
     U8,
     U16,
     U32,
     U64,
     U128,
-    
+
     // Floating point
     F32,
     F64,
-    
+
     // Other primitives
     Bool,
     Char,
     String,
     Unit,
-    
+
     // Composite types
     Named(String),
     Function(Vec<Type>, Box<Type>),
@@ -117,7 +117,7 @@ pub enum Type {
     MutPointer(Box<Type>),
     Array(Box<Type>, usize),
     Slice(Box<Type>),
-    
+
     // @TODO: Implement full generics support with type variables and constraints
     // Type variables for generics (TODO)
     TypeVar(String),
@@ -174,6 +174,12 @@ pub enum Expr {
         ty: Option<Type>,
         value: Box<Expr>,
         then: Box<Expr>,
+    },
+
+    // Assignment to an existing binding
+    Assign {
+        target: Box<Expr>,
+        value: Box<Expr>,
     },
 
     // If expression
@@ -234,12 +240,12 @@ pub enum Expr {
     Deref {
         expr: Box<Expr>,
     },
-    
+
     // Memory scope with automatic deallocation
     TempScope {
         body: Box<Expr>,
     },
-    
+
     // Unsafe block for explicit memory operations
     Unsafe {
         body: Box<Expr>,
@@ -268,7 +274,11 @@ pub struct Span {
 
 impl Span {
     pub fn new(start: usize, end: usize) -> Self {
-        Self { start, end, file: None }
+        Self {
+            start,
+            end,
+            file: None,
+        }
     }
 }
 

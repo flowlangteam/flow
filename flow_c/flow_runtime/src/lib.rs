@@ -1,7 +1,7 @@
 // Flow Runtime Library
 // Provides built-in functions and runtime support
 
-use std::alloc::{alloc, dealloc, Layout};
+use std::alloc::{Layout, alloc, dealloc};
 
 // String operations
 #[unsafe(no_mangle)]
@@ -9,13 +9,13 @@ pub extern "C" fn flow_string_new(data: *const u8, len: usize) -> *mut FlowStrin
     unsafe {
         let layout = Layout::new::<FlowString>();
         let ptr = alloc(layout) as *mut FlowString;
-        
+
         let string_data = Vec::from_raw_parts(data as *mut u8, len, len);
         let boxed = Box::new(string_data.into_boxed_slice());
-        
+
         (*ptr).data = Box::into_raw(boxed) as *const u8;
         (*ptr).len = len;
-        
+
         ptr
     }
 }

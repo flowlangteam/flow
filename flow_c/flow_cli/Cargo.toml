@@ -12,7 +12,7 @@ flow_ast = { path = "../flow_ast" }
 flow_lexer = { path = "../flow_lexer" }
 flow_parser = { path = "../flow_parser" }
 flow_analyzer = { path = "../flow_analyzer" }
-flow_codegen = { path = "../flow_codegen" }
+flow_compiler = { path = "../flow_compiler" }
 flow_runtime = { path = "../flow_runtime" }
 flow_transpiler = { path = "../flow_transpiler" }
 flow_transpiler_java = { path = "../flow_transpiler/flow_transpiler_java" }

@@ -1,5 +1,5 @@
-use crate::constant_pool::ConstantPool;
 use crate::bytecode::*;
+use crate::constant_pool::ConstantPool;
 use byteorder::{BigEndian, WriteBytesExt};
 use flow_transpiler::Result;
 use std::io::Write;
@@ -56,27 +56,32 @@ impl ClassWriter {
             methods: Vec::new(),
         }
     }
-    
+
     pub fn set_super_class(&mut self, super_class: impl Into<String>) {
         self.super_class = super_class.into();
     }
-    
+
     pub fn set_access_flags(&mut self, flags: u16) {
         self.access_flags = flags;
     }
-    
+
     pub fn add_interface(&mut self, interface: impl Into<String>) {
         self.interfaces.push(interface.into());
     }
-    
-    pub fn add_field(&mut self, name: impl Into<String>, descriptor: impl Into<String>, access_flags: u16) {
+
+    pub fn add_field(
+        &mut self,
+        name: impl Into<String>,
+        descriptor: impl Into<String>,
+        access_flags: u16,
+    ) {
         self.fields.push(FieldInfo {
             access_flags,
             name: name.into(),
             descriptor: descriptor.into(),
         });
     }
-    
+
     pub fn add_method(&mut self, name: impl Into<String>) -> MethodBuilder {
         MethodBuilder {
             class: self,
@@ -88,12 +93,12 @@ impl ClassWriter {
             max_locals: 100,
         }
     }
-    
+
     pub fn add_default_constructor(&mut self) {
         let mut constructor = self.add_method("<init>");
         constructor.set_descriptor("()V");
         constructor.set_access_flags(ACC_PUBLIC);
-        
+
         let mut code = CodeBuilder::new();
         code.add_instruction(Instruction::ALoad(0)); // Load 'this'
         code.add_instruction(Instruction::InvokeSpecial(
@@ -102,44 +107,44 @@ impl ClassWriter {
             "()V".to_string(),
         ));
         code.add_instruction(Instruction::Return);
-        
+
         constructor.set_code(code.build());
     }
-    
+
     pub fn write_bytes(&mut self) -> Result<Vec<u8>> {
         let mut bytes = Vec::new();
-        
+
         // Magic number
         bytes.write_u32::<BigEndian>(0xCAFEBABE)?;
-        
+
         // Minor and major version
         bytes.write_u16::<BigEndian>(0)?; // minor
         bytes.write_u16::<BigEndian>(JAVA_VERSION)?; // major
-        
+
         // Build constant pool with all necessary entries
         self.build_constant_pool();
-        
+
         // Write constant pool
         self.constant_pool.write(&mut bytes)?;
-        
+
         // Access flags
         bytes.write_u16::<BigEndian>(self.access_flags)?;
-        
+
         // This class (already added in build_constant_pool)
         let this_class_index = self.constant_pool.get_class_index(&self.class_name);
         bytes.write_u16::<BigEndian>(this_class_index)?;
-        
+
         // Super class (already added in build_constant_pool)
         let super_class_index = self.constant_pool.get_class_index(&self.super_class);
         bytes.write_u16::<BigEndian>(super_class_index)?;
-        
+
         // Interfaces
         bytes.write_u16::<BigEndian>(self.interfaces.len() as u16)?;
         for interface in &self.interfaces {
             let interface_index = self.constant_pool.get_class_index(interface);
             bytes.write_u16::<BigEndian>(interface_index)?;
         }
-        
+
         // Fields
         bytes.write_u16::<BigEndian>(self.fields.len() as u16)?;
         for field in &self.fields {
@@ -150,49 +155,49 @@ impl ClassWriter {
             bytes.write_u16::<BigEndian>(desc_index)?;
             bytes.write_u16::<BigEndian>(0)?; // attributes count
         }
-        
+
         // Methods
         bytes.write_u16::<BigEndian>(self.methods.len() as u16)?;
         let methods_clone = self.methods.clone();
         for method in &methods_clone {
             self.write_method(&mut bytes, method)?;
         }
-        
+
         // Class attributes
         bytes.write_u16::<BigEndian>(0)?; // attributes count
-        
+
         Ok(bytes)
     }
-    
+
     fn build_constant_pool(&mut self) {
         // Add class names
         self.constant_pool.add_class(&self.class_name);
         self.constant_pool.add_class(&self.super_class);
-        
+
         for interface in &self.interfaces {
             self.constant_pool.add_class(interface);
         }
-        
+
         // Add field names and descriptors
         for field in &self.fields {
             self.constant_pool.add_utf8(&field.name);
             self.constant_pool.add_utf8(&field.descriptor);
         }
-        
+
         // Add method names, descriptors, and process code
         for i in 0..self.methods.len() {
             let method = &self.methods[i];
             self.constant_pool.add_utf8(&method.name);
             self.constant_pool.add_utf8(&method.descriptor);
             self.constant_pool.add_utf8("Code");
-            
+
             if let Some(code) = &method.code {
                 let code_clone = code.clone();
                 self.add_code_constants(&code_clone);
             }
         }
     }
-    
+
     fn add_code_constants(&mut self, code: &[Instruction]) {
         for instr in code {
             match instr {
@@ -229,16 +234,16 @@ impl ClassWriter {
             }
         }
     }
-    
+
     fn write_method(&mut self, bytes: &mut Vec<u8>, method: &MethodInfo) -> Result<()> {
         bytes.write_u16::<BigEndian>(method.access_flags)?;
-        
+
         let name_index = self.constant_pool.get_utf8_index(&method.name);
         bytes.write_u16::<BigEndian>(name_index)?;
-        
+
         let desc_index = self.constant_pool.get_utf8_index(&method.descriptor);
         bytes.write_u16::<BigEndian>(desc_index)?;
-        
+
         // Attributes
         if let Some(code) = &method.code {
             bytes.write_u16::<BigEndian>(1)?; // One attribute (Code)
@@ -246,77 +251,78 @@ impl ClassWriter {
         } else {
             bytes.write_u16::<BigEndian>(0)?; // No attributes
         }
-        
+
         Ok(())
     }
-    
-    fn write_code_attribute(&mut self, bytes: &mut Vec<u8>, method: &MethodInfo, code: &[Instruction]) -> Result<()> {
+
+    fn write_code_attribute(
+        &mut self,
+        bytes: &mut Vec<u8>,
+        method: &MethodInfo,
+        code: &[Instruction],
+    ) -> Result<()> {
         let code_name_index = self.constant_pool.get_utf8_index("Code");
         bytes.write_u16::<BigEndian>(code_name_index)?;
-        
+
         // Write code to temporary buffer to calculate length
         let mut code_bytes = Vec::new();
         self.write_instructions(&mut code_bytes, code)?;
-        
+
         // Attribute length = max_stack(2) + max_locals(2) + code_length(4) + code + exception_table_length(2) + attributes_count(2)
         let attribute_length = 2 + 2 + 4 + code_bytes.len() + 2 + 2;
         bytes.write_u32::<BigEndian>(attribute_length as u32)?;
-        
+
         // Max stack and max locals
         bytes.write_u16::<BigEndian>(method.max_stack)?;
         bytes.write_u16::<BigEndian>(method.max_locals)?;
-        
+
         // Code length and code
         bytes.write_u32::<BigEndian>(code_bytes.len() as u32)?;
         bytes.write_all(&code_bytes)?;
-        
+
         // Exception table (empty)
         bytes.write_u16::<BigEndian>(0)?;
-        
+
         // Code attributes (empty)
         bytes.write_u16::<BigEndian>(0)?;
-        
+
         Ok(())
     }
-    
+
     fn write_instructions(&mut self, bytes: &mut Vec<u8>, code: &[Instruction]) -> Result<()> {
         for instr in code {
             match instr {
-                Instruction::IConst(n) => {
-                    match n {
-                        -1 => bytes.write_u8(ICONST_M1)?,
-                        0 => bytes.write_u8(ICONST_0)?,
-                        1 => bytes.write_u8(ICONST_1)?,
-                        2 => bytes.write_u8(ICONST_2)?,
-                        3 => bytes.write_u8(ICONST_3)?,
-                        4 => bytes.write_u8(ICONST_4)?,
-                        5 => bytes.write_u8(ICONST_5)?,
-                        -128..=127 => {
-                            bytes.write_u8(BIPUSH)?;
-                            bytes.write_i8(*n as i8)?;
-                        }
-                        -32768..=32767 => {
-                            bytes.write_u8(SIPUSH)?;
-                            bytes.write_i16::<BigEndian>(*n as i16)?;
-                        }
-                        _ => {
-                            let index = self.constant_pool.add_integer(*n);
-                            bytes.write_u8(LDC_W)?;
-                            bytes.write_u16::<BigEndian>(index)?;
-                        }
+                Instruction::IConst(n) => match n {
+                    -1 => bytes.write_u8(ICONST_M1)?,
+                    0 => bytes.write_u8(ICONST_0)?,
+                    1 => bytes.write_u8(ICONST_1)?,
+                    2 => bytes.write_u8(ICONST_2)?,
+                    3 => bytes.write_u8(ICONST_3)?,
+                    4 => bytes.write_u8(ICONST_4)?,
+                    5 => bytes.write_u8(ICONST_5)?,
+                    -128..=127 => {
+                        bytes.write_u8(BIPUSH)?;
+                        bytes.write_i8(*n as i8)?;
                     }
-                }
-                Instruction::LConst(n) => {
-                    match n {
-                        0 => bytes.write_u8(LCONST_0)?,
-                        1 => bytes.write_u8(LCONST_1)?,
-                        _ => {
-                            let index = self.constant_pool.add_long(*n);
-                            bytes.write_u8(LDC2_W)?;
-                            bytes.write_u16::<BigEndian>(index)?;
-                        }
+                    -32768..=32767 => {
+                        bytes.write_u8(SIPUSH)?;
+                        bytes.write_i16::<BigEndian>(*n as i16)?;
                     }
-                }
+                    _ => {
+                        let index = self.constant_pool.add_integer(*n);
+                        bytes.write_u8(LDC_W)?;
+                        bytes.write_u16::<BigEndian>(index)?;
+                    }
+                },
+                Instruction::LConst(n) => match n {
+                    0 => bytes.write_u8(LCONST_0)?,
+                    1 => bytes.write_u8(LCONST_1)?,
+                    _ => {
+                        let index = self.constant_pool.add_long(*n);
+                        bytes.write_u8(LDC2_W)?;
+                        bytes.write_u16::<BigEndian>(index)?;
+                    }
+                },
                 Instruction::FConst(f) => {
                     if *f == 0.0 {
                         bytes.write_u8(FCONST_0)?;
@@ -367,30 +373,26 @@ impl ClassWriter {
                         bytes.write_u8(index as u8)?;
                     }
                 }
-                Instruction::ILoad(index) => {
-                    match index {
-                        0 => bytes.write_u8(ILOAD_0)?,
-                        1 => bytes.write_u8(ILOAD_1)?,
-                        2 => bytes.write_u8(ILOAD_2)?,
-                        3 => bytes.write_u8(ILOAD_3)?,
-                        _ => {
-                            bytes.write_u8(ILOAD)?;
-                            bytes.write_u8(*index as u8)?;
-                        }
+                Instruction::ILoad(index) => match index {
+                    0 => bytes.write_u8(ILOAD_0)?,
+                    1 => bytes.write_u8(ILOAD_1)?,
+                    2 => bytes.write_u8(ILOAD_2)?,
+                    3 => bytes.write_u8(ILOAD_3)?,
+                    _ => {
+                        bytes.write_u8(ILOAD)?;
+                        bytes.write_u8(*index as u8)?;
                     }
-                }
-                Instruction::LLoad(index) => {
-                    match index {
-                        0 => bytes.write_u8(LLOAD_0)?,
-                        1 => bytes.write_u8(LLOAD_1)?,
-                        2 => bytes.write_u8(LLOAD_2)?,
-                        3 => bytes.write_u8(LLOAD_3)?,
-                        _ => {
-                            bytes.write_u8(LLOAD)?;
-                            bytes.write_u8(*index as u8)?;
-                        }
+                },
+                Instruction::LLoad(index) => match index {
+                    0 => bytes.write_u8(LLOAD_0)?,
+                    1 => bytes.write_u8(LLOAD_1)?,
+                    2 => bytes.write_u8(LLOAD_2)?,
+                    3 => bytes.write_u8(LLOAD_3)?,
+                    _ => {
+                        bytes.write_u8(LLOAD)?;
+                        bytes.write_u8(*index as u8)?;
                     }
-                }
+                },
                 Instruction::FLoad(index) => {
                     bytes.write_u8(FLOAD)?;
                     bytes.write_u8(*index as u8)?;
@@ -552,7 +554,7 @@ impl ClassWriter {
                 }
             }
         }
-        
+
         Ok(())
     }
 }
@@ -571,19 +573,19 @@ impl<'a> MethodBuilder<'a> {
     pub fn set_descriptor(&mut self, descriptor: impl Into<String>) {
         self.descriptor = descriptor.into();
     }
-    
+
     pub fn set_access_flags(&mut self, flags: u16) {
         self.access_flags = flags;
     }
-    
+
     pub fn set_code(&mut self, code: Vec<Instruction>) {
         self.code = Some(code);
     }
-    
+
     pub fn set_max_stack(&mut self, max: u16) {
         self.max_stack = max;
     }
-    
+
     pub fn set_max_locals(&mut self, max: u16) {
         self.max_locals = max;
     }

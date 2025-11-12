@@ -6,7 +6,7 @@ use std::process::Command;
 
 fn main() {
     println!("Testing Java Bytecode Generation\n");
-    
+
     // Test 1: Simple function
     println!("1. Testing simple function...");
     let program = Program {
@@ -18,20 +18,27 @@ fn main() {
             is_pub: true,
         })],
     };
-    
+
     let mut transpiler = JavaTranspiler::new("SimpleTest");
     let bytecode = transpiler.transpile(&program).expect("Failed to transpile");
     fs::write("SimpleTest.class", &bytecode).expect("Failed to write class file");
     println!("   Generated SimpleTest.class ({} bytes)", bytecode.len());
-    
+
     // Verify with javap
     let output = Command::new("javap")
         .arg("-v")
         .arg("SimpleTest.class")
         .output();
-    
+
     if let Ok(output) = output {
-        println!("   javap verification: {}", if output.status.success() { "✓ VALID" } else { "✗ INVALID" });
+        println!(
+            "   javap verification: {}",
+            if output.status.success() {
+                "✓ VALID"
+            } else {
+                "✗ INVALID"
+            }
+        );
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
             // Print first few lines
@@ -42,15 +49,21 @@ fn main() {
     } else {
         println!("   javap not available, skipping validation");
     }
-    
+
     // Test 2: Arithmetic operations
     println!("\n2. Testing arithmetic operations...");
     let program = Program {
         items: vec![Item::Function(Function {
             name: "add".to_string(),
             params: vec![
-                Param { name: "a".to_string(), ty: Type::I64 },
-                Param { name: "b".to_string(), ty: Type::I64 },
+                Param {
+                    name: "a".to_string(),
+                    ty: Type::I64,
+                },
+                Param {
+                    name: "b".to_string(),
+                    ty: Type::I64,
+                },
             ],
             return_type: Some(Type::I64),
             body: Expr::Binary {
@@ -61,19 +74,25 @@ fn main() {
             is_pub: true,
         })],
     };
-    
+
     let mut transpiler = JavaTranspiler::new("ArithmeticTest");
     let bytecode = transpiler.transpile(&program).expect("Failed to transpile");
     fs::write("ArithmeticTest.class", &bytecode).expect("Failed to write class file");
-    println!("   Generated ArithmeticTest.class ({} bytes)", bytecode.len());
-    
+    println!(
+        "   Generated ArithmeticTest.class ({} bytes)",
+        bytecode.len()
+    );
+
     // Test 3: Complex example with pipes
     println!("\n3. Testing pipe operator...");
     let program = Program {
         items: vec![
             Item::Function(Function {
                 name: "double".to_string(),
-                params: vec![Param { name: "x".to_string(), ty: Type::I64 }],
+                params: vec![Param {
+                    name: "x".to_string(),
+                    ty: Type::I64,
+                }],
                 return_type: Some(Type::I64),
                 body: Expr::Binary {
                     op: BinOp::Mul,
@@ -94,12 +113,12 @@ fn main() {
             }),
         ],
     };
-    
+
     let mut transpiler = JavaTranspiler::new("PipeTest");
     let bytecode = transpiler.transpile(&program).expect("Failed to transpile");
     fs::write("PipeTest.class", &bytecode).expect("Failed to write class file");
     println!("   Generated PipeTest.class ({} bytes)", bytecode.len());
-    
+
     println!("\n✓ All tests completed successfully!");
     println!("\nGenerated class files:");
     println!("  - SimpleTest.class");

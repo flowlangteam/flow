@@ -1,17 +1,17 @@
 [workspace]
 members = [
-    "flow_cli",
-    "flow_lexer",
     "flow_ast",
+    "flow_lexer", 
     "flow_parser",
     "flow_analyzer",
-    "flow_codegen",
     "flow_runtime",
     "flow_stdlib",
+    "flow_compiler",
     "flow_transpiler",
     "flow_transpiler/flow_transpiler_java",
-    "flow_jni",
     "flow_lsp",
+    "flow_cli",
+    "flow_jni",
 ]
 resolver = "2"
 

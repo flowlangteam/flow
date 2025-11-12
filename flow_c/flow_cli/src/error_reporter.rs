@@ -63,18 +63,16 @@ impl ErrorReporter {
     /// Display a rich error with source context and suggestions
     pub fn display_error(&self, error: &RichError) -> String {
         let mut output = String::new();
-        
+
         // Error header
-        output.push_str(&format!("{}: {}\n", 
-            "error".red().bold(), 
+        output.push_str(&format!(
+            "{}: {}\n",
+            "error".red().bold(),
             error.title.bold()
         ));
 
         if let Some(code) = &error.code {
-            output.push_str(&format!("{}: {}\n", 
-                "code".blue().bold(), 
-                code
-            ));
+            output.push_str(&format!("{}: {}\n", "code".blue().bold(), code));
         }
 
         // Primary span with source context
@@ -91,13 +89,16 @@ impl ErrorReporter {
 
         // Suggestions
         for suggestion in &error.suggestions {
-            output.push_str(&format!("{}: {}\n", 
-                "help".cyan().bold(), 
+            output.push_str(&format!(
+                "{}: {}\n",
+                "help".cyan().bold(),
                 suggestion.message
             ));
-            
+
             for replacement in &suggestion.replacements {
-                if let Some(suggestion_lines) = self.get_suggestion_context(&replacement.span, &replacement.text) {
+                if let Some(suggestion_lines) =
+                    self.get_suggestion_context(&replacement.span, &replacement.text)
+                {
                     output.push_str(&suggestion_lines);
                 }
             }
@@ -105,10 +106,7 @@ impl ErrorReporter {
 
         // Notes
         for note in &error.notes {
-            output.push_str(&format!("{}: {}\n", 
-                "note".blue().bold(), 
-                note
-            ));
+            output.push_str(&format!("{}: {}\n", "note".blue().bold(), note));
         }
 
         output
@@ -118,60 +116,71 @@ impl ErrorReporter {
     fn get_source_context(&self, span: &ErrorSpan) -> Option<String> {
         let file_path = span.file.as_ref()?;
         let content = self.file_cache.get(file_path)?;
-        
-        let (line_num, col_start, col_end, line_content) = self.get_line_info(content, span.start, span.end)?;
-        
+
+        let (line_num, col_start, col_end, line_content) =
+            self.get_line_info(content, span.start, span.end)?;
+
         let mut output = String::new();
-        
+
         // File location
-        output.push_str(&format!("  {} {}:{}:{}\n",
+        output.push_str(&format!(
+            "  {} {}:{}:{}\n",
             "-->".blue().bold(),
             file_path,
             line_num,
             col_start + 1
         ));
-        
+
         // Line number padding
         let line_num_width = line_num.to_string().len();
         let padding = " ".repeat(line_num_width);
-        
+
         // Empty line before source
         output.push_str(&format!("   {}{}\n", padding, "|".blue().bold()));
-        
+
         // Source line
-        output.push_str(&format!("{} {} {}\n",
-            format!("{:width$}", line_num, width = line_num_width).blue().bold(),
+        output.push_str(&format!(
+            "{} {} {}\n",
+            format!("{:width$}", line_num, width = line_num_width)
+                .blue()
+                .bold(),
             "|".blue().bold(),
             line_content
         ));
-        
+
         // Error indicator
         let indicator_padding = " ".repeat(col_start);
-        let indicator_length = if col_end > col_start { col_end - col_start } else { 1 };
+        let indicator_length = if col_end > col_start {
+            col_end - col_start
+        } else {
+            1
+        };
         let indicator = match span.style {
             SpanStyle::Primary => "^".repeat(indicator_length).red().bold(),
             SpanStyle::Secondary => "-".repeat(indicator_length).yellow().bold(),
             SpanStyle::Note => "^".repeat(indicator_length).blue().bold(),
             SpanStyle::Help => "^".repeat(indicator_length).cyan().bold(),
         };
-        
-        output.push_str(&format!("   {}{}{}{}\n",
+
+        output.push_str(&format!(
+            "   {}{}{}{}\n",
             padding,
             "|".blue().bold(),
             indicator_padding,
             indicator
         ));
-        
+
         // Label
         if let Some(label) = &span.label {
-            output.push_str(&format!("   {}{}{}{}\n",
+            output.push_str(&format!(
+                "   {}{}{}{}\n",
                 padding,
                 "|".blue().bold(),
                 indicator_padding,
                 label.red()
             ));
         }
-        
+
         Some(output)
     }
 
@@ -179,59 +188,73 @@ impl ErrorReporter {
     fn get_suggestion_context(&self, span: &ErrorSpan, replacement_text: &str) -> Option<String> {
         let file_path = span.file.as_ref()?;
         let content = self.file_cache.get(file_path)?;
-        
-        let (line_num, col_start, col_end, line_content) = self.get_line_info(content, span.start, span.end)?;
-        
+
+        let (line_num, col_start, col_end, line_content) =
+            self.get_line_info(content, span.start, span.end)?;
+
         let mut output = String::new();
-        
+
         // Line number padding
         let line_num_width = line_num.to_string().len();
         let padding = " ".repeat(line_num_width);
-        
+
         // Show the line with suggested replacement
         let before = &line_content[..col_start];
         let after = &line_content[col_end..];
         let suggested_line = format!("{}{}{}", before, replacement_text, after);
-        
-        output.push_str(&format!("{} {} {}\n",
-            format!("{:width$}", line_num, width = line_num_width).blue().bold(),
+
+        output.push_str(&format!(
+            "{} {} {}\n",
+            format!("{:width$}", line_num, width = line_num_width)
+                .blue()
+                .bold(),
             "|".blue().bold(),
             suggested_line
         ));
-        
+
         // Highlight the replacement
         let indicator_padding = " ".repeat(col_start);
         let indicator_length = replacement_text.len();
         let indicator = "~".repeat(indicator_length).green().bold();
-        
-        output.push_str(&format!("   {}{}{}{}\n",
+
+        output.push_str(&format!(
+            "   {}{}{}{}\n",
             padding,
             "|".blue().bold(),
             indicator_padding,
             indicator
         ));
-        
+
         Some(output)
     }
 
     /// Extract line information from source content
-    fn get_line_info(&self, content: &str, start: usize, end: usize) -> Option<(usize, usize, usize, String)> {
+    fn get_line_info(
+        &self,
+        content: &str,
+        start: usize,
+        end: usize,
+    ) -> Option<(usize, usize, usize, String)> {
         let lines: Vec<&str> = content.lines().collect();
         let mut char_pos = 0;
-        
+
         for (line_idx, line) in lines.iter().enumerate() {
             let line_start = char_pos;
             let line_end = char_pos + line.len();
-            
+
             if start >= line_start && start <= line_end {
                 let col_start = start - line_start;
-                let col_end = if end <= line_end { end - line_start } else { line.len() };
+                let col_end = if end <= line_end {
+                    end - line_start
+                } else {
+                    line.len()
+                };
                 return Some((line_idx + 1, col_start, col_end, line.to_string()));
             }
-            
+
             char_pos = line_end + 1; // +1 for newline
         }
-        
+
         None
     }
 }

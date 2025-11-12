@@ -59,7 +59,7 @@ impl Parser {
         let start_pos = self.pos;
         self.expect(&Token::Func)?;
         let name = self.expect_ident()?;
-        
+
         self.expect(&Token::LParen)?;
         let params = self.parse_params()?;
         self.expect(&Token::RParen)?;
@@ -86,7 +86,7 @@ impl Parser {
 
     fn parse_params(&mut self) -> ParseResult<Vec<Param>> {
         let mut params = Vec::new();
-        
+
         if self.check(&Token::RParen) {
             return Ok(params);
         }
@@ -109,28 +109,77 @@ impl Parser {
     fn parse_type(&mut self) -> ParseResult<Type> {
         match self.peek() {
             // Primitive signed integers
-            Some(Token::I8) => { self.advance(); Ok(Type::I8) }
-            Some(Token::I16) => { self.advance(); Ok(Type::I16) }
-            Some(Token::I32) => { self.advance(); Ok(Type::I32) }
-            Some(Token::I64) => { self.advance(); Ok(Type::I64) }
-            Some(Token::I128) => { self.advance(); Ok(Type::I128) }
-            
+            Some(Token::I8) => {
+                self.advance();
+                Ok(Type::I8)
+            }
+            Some(Token::I16) => {
+                self.advance();
+                Ok(Type::I16)
+            }
+            Some(Token::I32) => {
+                self.advance();
+                Ok(Type::I32)
+            }
+            Some(Token::I64) => {
+                self.advance();
+                Ok(Type::I64)
+            }
+            Some(Token::I128) => {
+                self.advance();
+                Ok(Type::I128)
+            }
+
             // Primitive unsigned integers
-            Some(Token::U8) => { self.advance(); Ok(Type::U8) }
-            Some(Token::U16) => { self.advance(); Ok(Type::U16) }
-            Some(Token::U32) => { self.advance(); Ok(Type::U32) }
-            Some(Token::U64) => { self.advance(); Ok(Type::U64) }
-            Some(Token::U128) => { self.advance(); Ok(Type::U128) }
-            
+            Some(Token::U8) => {
+                self.advance();
+                Ok(Type::U8)
+            }
+            Some(Token::U16) => {
+                self.advance();
+                Ok(Type::U16)
+            }
+            Some(Token::U32) => {
+                self.advance();
+                Ok(Type::U32)
+            }
+            Some(Token::U64) => {
+                self.advance();
+                Ok(Type::U64)
+            }
+            Some(Token::U128) => {
+                self.advance();
+                Ok(Type::U128)
+            }
+
             // Floating point
-            Some(Token::F32) => { self.advance(); Ok(Type::F32) }
-            Some(Token::F64) => { self.advance(); Ok(Type::F64) }
-            
+            Some(Token::F32) => {
+                self.advance();
+                Ok(Type::F32)
+            }
+            Some(Token::F64) => {
+                self.advance();
+                Ok(Type::F64)
+            }
+
             // Other primitives
-            Some(Token::BoolType) => { self.advance(); Ok(Type::Bool) }
-            Some(Token::CharType) => { self.advance(); Ok(Type::Char) }
-            Some(Token::StrType) => { self.advance(); Ok(Type::String) }
-            
+            Some(Token::BoolType) => {
+                self.advance();
+                Ok(Type::Bool)
+            }
+            Some(Token::CharType) => {
+                self.advance();
+                Ok(Type::Char)
+            }
+            Some(Token::StrType) => {
+                self.advance();
+                Ok(Type::String)
+            }
+            Some(Token::SelfType) => {
+                self.advance();
+                Ok(Type::Named("Self".to_string()))
+            }
+
             Some(Token::Ident(s)) => {
                 let s = s.clone();
                 self.advance();
@@ -152,7 +201,7 @@ impl Parser {
                 // Array or slice type: [T; N] or [T]
                 self.advance();
                 let inner = self.parse_type()?;
-                
+
                 if self.check(&Token::Semi) {
                     self.advance();
                     if let Some(Token::Integer(n)) = self.peek() {
@@ -207,7 +256,7 @@ impl Parser {
             let field_name = self.expect_ident()?;
             self.expect(&Token::Colon)?;
             let ty = self.parse_type()?;
-            
+
             fields.push(Field {
                 name: field_name,
                 ty,
@@ -263,7 +312,7 @@ impl Parser {
             self.expect(&Token::Func)?;
             let name = self.expect_ident()?;
             self.expect(&Token::LParen)?;
-            
+
             let mut params = Vec::new();
             if !self.check(&Token::RParen) {
                 loop {
@@ -299,7 +348,7 @@ impl Parser {
 
     fn parse_import(&mut self) -> ParseResult<Import> {
         self.expect(&Token::Import)?;
-        
+
         let mut path = vec![self.expect_ident()?];
         while self.check(&Token::DoubleColon) {
             self.advance();
@@ -320,18 +369,21 @@ impl Parser {
 
     fn parse_namespace_declaration(&mut self) -> ParseResult<NamespaceDecl> {
         self.expect(&Token::As)?;
-        
+
         let namespace = self.expect_ident()?;
         self.expect(&Token::DoubleColon)?;
         let filename = self.expect_ident()?;
         self.expect(&Token::Semi)?;
 
-        Ok(NamespaceDecl { namespace, filename })
+        Ok(NamespaceDecl {
+            namespace,
+            filename,
+        })
     }
 
     fn parse_use_declaration(&mut self) -> ParseResult<UseDecl> {
         self.expect(&Token::Use)?;
-        
+
         let namespace = self.expect_ident()?;
         self.expect(&Token::DoubleColon)?;
         let filename = self.expect_ident()?;
@@ -345,7 +397,11 @@ impl Parser {
 
         self.expect(&Token::Semi)?;
 
-        Ok(UseDecl { namespace, filename, alias })
+        Ok(UseDecl {
+            namespace,
+            filename,
+            alias,
+        })
     }
 
     fn parse_block_or_expr(&mut self) -> ParseResult<Expr> {
@@ -362,7 +418,7 @@ impl Parser {
 
         while !self.check(&Token::RBrace) {
             exprs.push(self.parse_expr()?);
-            
+
             if self.check(&Token::Semi) {
                 self.advance();
             } else if !self.check(&Token::RBrace) {
@@ -382,7 +438,26 @@ impl Parser {
     }
 
     fn parse_expr(&mut self) -> ParseResult<Expr> {
-        self.parse_pipe()
+        self.parse_assignment()
+    }
+
+    fn parse_assignment(&mut self) -> ParseResult<Expr> {
+        let expr = self.parse_pipe()?;
+
+        if self.check(&Token::Eq) {
+            self.advance();
+            let value = Box::new(self.parse_assignment()?);
+
+            match expr {
+                Expr::Ident(_) | Expr::Field { .. } => Ok(Expr::Assign {
+                    target: Box::new(expr),
+                    value,
+                }),
+                _ => Err(self.error("Invalid assignment target")),
+            }
+        } else {
+            Ok(expr)
+        }
     }
 
     fn parse_pipe(&mut self) -> ParseResult<Expr> {
@@ -403,7 +478,7 @@ impl Parser {
     fn parse_let(&mut self) -> ParseResult<Expr> {
         if self.check(&Token::Let) {
             self.advance();
-            
+
             let mutable = if self.check(&Token::Mut) {
                 self.advance();
                 true
@@ -412,7 +487,7 @@ impl Parser {
             };
 
             let name = self.expect_ident()?;
-            
+
             let ty = if self.check(&Token::Colon) {
                 self.advance();
                 Some(self.parse_type()?)
@@ -422,7 +497,7 @@ impl Parser {
 
             self.expect(&Token::Eq)?;
             let value = Box::new(self.parse_expr()?);
-            
+
             self.expect(&Token::Semi)?;
             let then = Box::new(self.parse_expr()?);
 
@@ -443,7 +518,7 @@ impl Parser {
             self.advance();
             let cond = Box::new(self.parse_logical_or()?);
             let then = Box::new(self.parse_block_or_expr()?);
-            
+
             let else_ = if self.check(&Token::Else) {
                 self.advance();
                 Some(Box::new(self.parse_block_or_expr()?))
@@ -467,7 +542,7 @@ impl Parser {
         let mut arms = Vec::new();
         while !self.check(&Token::RBrace) {
             let pattern = self.parse_pattern()?;
-            
+
             let guard = if self.check(&Token::If) {
                 self.advance();
                 Some(self.parse_logical_or()?)
@@ -503,12 +578,12 @@ impl Parser {
             Some(Token::Ident(s)) => {
                 let s = s.clone();
                 self.advance();
-                
+
                 // Could be a struct pattern
                 if self.check(&Token::LBrace) {
                     self.advance();
                     let mut fields = Vec::new();
-                    
+
                     while !self.check(&Token::RBrace) {
                         let field_name = self.expect_ident()?;
                         self.expect(&Token::Colon)?;
@@ -692,7 +767,7 @@ impl Parser {
             } else if self.check(&Token::Dot) {
                 self.advance();
                 let field = self.expect_ident()?;
-                
+
                 if self.check(&Token::LParen) {
                     self.advance();
                     let args = self.parse_args()?;
@@ -762,18 +837,18 @@ impl Parser {
             Some(Token::Ident(s)) => {
                 let s = s.clone();
                 self.advance();
-                
+
                 // Check for namespace resolution (::)
                 if self.check(&Token::DoubleColon) {
                     self.advance();
                     let member = self.expect_ident()?;
                     let namespaced_ident = format!("{}::{}", s, member);
-                    
+
                     // Check for struct initialization
                     if self.check(&Token::LBrace) {
                         self.advance();
                         let mut fields = HashMap::new();
-                        
+
                         while !self.check(&Token::RBrace) {
                             let field_name = self.expect_ident()?;
                             self.expect(&Token::Colon)?;
@@ -788,7 +863,10 @@ impl Parser {
 
                         self.expect(&Token::RBrace)?;
 
-                        Ok(Expr::StructInit { name: namespaced_ident, fields })
+                        Ok(Expr::StructInit {
+                            name: namespaced_ident,
+                            fields,
+                        })
                     } else {
                         Ok(Expr::Ident(namespaced_ident))
                     }
@@ -797,7 +875,7 @@ impl Parser {
                     if self.check(&Token::LBrace) {
                         self.advance();
                         let mut fields = HashMap::new();
-                        
+
                         while !self.check(&Token::RBrace) {
                             let field_name = self.expect_ident()?;
                             self.expect(&Token::Colon)?;
@@ -854,7 +932,7 @@ impl Parser {
                 self.expect(&Token::Lt)?;
                 let ty = self.parse_type()?;
                 self.expect(&Token::Gt)?;
-                
+
                 let count = if self.check(&Token::LBracket) {
                     self.advance();
                     let expr = self.parse_expr()?;
@@ -863,7 +941,7 @@ impl Parser {
                 } else {
                     None
                 };
-                
+
                 Ok(Expr::Alloc { ty, count })
             }
             Some(Token::Free) => {
@@ -895,14 +973,14 @@ impl Parser {
     fn parse_lambda(&mut self) -> ParseResult<Expr> {
         self.expect(&Token::Lambda)?;
         self.expect(&Token::LBracket)?;
-        
+
         let mut params = Vec::new();
         if !self.check(&Token::RBracket) {
             loop {
                 let name = self.expect_ident()?;
                 self.expect(&Token::Colon)?;
                 let ty = self.parse_type()?;
-                
+
                 params.push(Param { name, ty });
 
                 if !self.check(&Token::Comma) {
@@ -961,6 +1039,10 @@ impl Parser {
                 self.advance();
                 Ok(s)
             }
+            Some(Token::SelfKw) => {
+                self.advance();
+                Ok("self".to_string())
+            }
             _ => Err(self.error("Expected identifier")),
         }
     }
@@ -991,7 +1073,7 @@ impl Parser {
         } else {
             0
         };
-        
+
         let end = if self.pos > 0 {
             if let Some((_, range)) = self.tokens.get(self.pos - 1) {
                 range.end
@@ -1066,7 +1148,7 @@ mod tests {
         let source = "as std::io; func add(x: i64, y: i64) -> i64 { x + y }";
         let mut parser = Parser::new(source);
         let program = parser.parse().unwrap();
-        
+
         assert!(program.namespace.is_some());
         let namespace = program.namespace.unwrap();
         assert_eq!(namespace.namespace, "std");
@@ -1079,10 +1161,10 @@ mod tests {
         let source = "use std::io; func main() -> i64 { 42 }";
         let mut parser = Parser::new(source);
         let program = parser.parse().unwrap();
-        
+
         assert!(program.namespace.is_none());
         assert_eq!(program.items.len(), 2);
-        
+
         match &program.items[0] {
             Item::Use(use_decl) => {
                 assert_eq!(use_decl.namespace, "std");
@@ -1098,9 +1180,9 @@ mod tests {
         let source = "use std::io as stdio; func main() -> i64 { 42 }";
         let mut parser = Parser::new(source);
         let program = parser.parse().unwrap();
-        
+
         assert_eq!(program.items.len(), 2);
-        
+
         match &program.items[0] {
             Item::Use(use_decl) => {
                 assert_eq!(use_decl.namespace, "std");
@@ -1120,9 +1202,9 @@ mod tests {
         "#;
         let mut parser = Parser::new(source);
         let program = parser.parse().unwrap();
-        
+
         assert_eq!(program.items.len(), 3);
-        
+
         match &program.items[0] {
             Item::Use(use_decl) => {
                 assert_eq!(use_decl.namespace, "std");
@@ -1131,7 +1213,7 @@ mod tests {
             }
             _ => panic!("Expected Use item"),
         }
-        
+
         match &program.items[1] {
             Item::Use(use_decl) => {
                 assert_eq!(use_decl.namespace, "math");
@@ -1157,14 +1239,14 @@ mod tests {
         "#;
         let mut parser = Parser::new(source);
         let program = parser.parse().unwrap();
-        
+
         assert!(program.namespace.is_some());
         let namespace = program.namespace.unwrap();
         assert_eq!(namespace.namespace, "utils");
         assert_eq!(namespace.filename, "math");
-        
+
         assert_eq!(program.items.len(), 2);
-        
+
         match &program.items[0] {
             Item::Function(func) => {
                 assert_eq!(func.name, "add");
@@ -1172,7 +1254,7 @@ mod tests {
             }
             _ => panic!("Expected Function item"),
         }
-        
+
         match &program.items[1] {
             Item::Function(func) => {
                 assert_eq!(func.name, "private_helper");
@@ -1193,9 +1275,9 @@ mod tests {
         "#;
         let mut parser = Parser::new(source);
         let program = parser.parse().unwrap();
-        
+
         assert_eq!(program.items.len(), 2);
-        
+
         match &program.items[0] {
             Item::Use(use_decl) => {
                 assert_eq!(use_decl.namespace, "std");
@@ -1203,12 +1285,15 @@ mod tests {
             }
             _ => panic!("Expected Use item"),
         }
-        
+
         match &program.items[1] {
             Item::Function(func) => {
                 assert_eq!(func.name, "main");
                 match &func.body {
-                    Expr::Call { func: call_func, args } => {
+                    Expr::Call {
+                        func: call_func,
+                        args,
+                    } => {
                         match call_func.as_ref() {
                             Expr::Ident(name) => {
                                 assert_eq!(name, "math::add");
