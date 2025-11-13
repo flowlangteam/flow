@@ -44,15 +44,22 @@ impl AnalyzerBridge {
                     }
                 }
             }
-            Err(parse_error) => {
+            Err(diagnostic) => {
+                let span = diagnostic
+                    .labels
+                    .iter()
+                    .find(|label| matches!(label.style, flow_ast::LabelStyle::Primary))
+                    .map(|label| label.span.clone())
+                    .unwrap_or_else(|| Span::new(0, 0));
+
                 // Convert parse error to diagnostic
                 let diagnostic = Diagnostic {
-                    range: parse_error_to_range(&parse_error.span, text),
+                    range: span_to_range(&span, text),
                     severity: Some(DiagnosticSeverity::ERROR),
                     code: None,
                     code_description: None,
                     source: Some("flow-parser".to_string()),
-                    message: parse_error.message,
+                    message: diagnostic.message,
                     related_information: None,
                     tags: None,
                     data: None,
@@ -296,15 +303,6 @@ fn span_to_range(span: &Span, text: &str) -> Range {
 }
 
 /// Convert a parse error range to an LSP Range
-fn parse_error_to_range(range: &std::ops::Range<usize>, text: &str) -> Range {
-    let start_pos = offset_to_position(range.start, text);
-    let end_pos = offset_to_position(range.end, text);
-    Range {
-        start: start_pos,
-        end: end_pos,
-    }
-}
-
 /// Convert byte offset to LSP Position
 fn offset_to_position(offset: usize, text: &str) -> Position {
     let mut line = 0u32;

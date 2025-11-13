@@ -1,6 +1,6 @@
 use crate::{CompilerConfig, CompilerError, Result};
 use cranelift::codegen::ir::stackslot::{StackSlotData, StackSlotKind};
-use cranelift::codegen::ir::{MemFlags, StackSlot};
+use cranelift::codegen::ir::{BlockArg, MemFlags, StackSlot};
 use cranelift::codegen::settings;
 use cranelift::codegen::Context;
 use cranelift::prelude::*;
@@ -11,6 +11,7 @@ use cranelift_object::{ObjectBuilder, ObjectModule};
 use flow_ast::*;
 use std::collections::{HashMap, HashSet};
 use std::mem;
+use thiserror::Error;
 
 // External C functions for standard library
 extern "C" {
@@ -65,6 +66,36 @@ impl ModuleRegistry {
         self.modules
             .values()
             .find_map(|module| module.functions.iter().find(|func| func.name == name))
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum JitError {
+    #[error("Cranelift error: {0}")]
+    Cranelift(String),
+    #[error("Module registry error: {0}")]
+    ModuleRegistry(String),
+    #[error("{0}")]
+    Message(String),
+}
+
+pub type JitResult<T> = std::result::Result<T, JitError>;
+
+impl From<JitError> for CompilerError {
+    fn from(err: JitError) -> Self {
+        CompilerError::JitError(err.to_string())
+    }
+}
+
+impl From<String> for JitError {
+    fn from(err: String) -> Self {
+        JitError::Message(err)
+    }
+}
+
+impl From<&str> for JitError {
+    fn from(err: &str) -> Self {
+        JitError::Message(err.to_string())
     }
 }
 
@@ -191,7 +222,7 @@ impl<'a, M: Module> CodegenState<'a, M> {
         self.pointer_type.bytes() as usize
     }
 
-    fn register_runtime_intrinsics(&mut self) -> Result<()> {
+    fn register_runtime_intrinsics(&mut self) -> JitResult<()> {
         let byte_type = flow_ast::Type::U8;
         let pointer_to_byte = flow_ast::Type::Pointer(Box::new(byte_type.clone()));
         let mut_pointer_to_byte = flow_ast::Type::MutPointer(Box::new(byte_type));
@@ -220,19 +251,17 @@ impl<'a, M: Module> CodegenState<'a, M> {
         name: &str,
         params: Vec<flow_ast::Type>,
         return_type: Option<flow_ast::Type>,
-    ) -> Result<()> {
+    ) -> JitResult<()> {
         let mut sig = self.module.make_signature();
         let pointer_type = self.pointer_type();
 
         for param_type in &params {
-            let cranelift_type = type_to_cranelift(param_type, pointer_type, None)
-                .map_err(|e| CompilerError::JitError(e))?;
+            let cranelift_type = type_to_cranelift(param_type, pointer_type, None)?;
             sig.params.push(AbiParam::new(cranelift_type));
         }
 
         if let Some(ret_type) = &return_type {
-            let cranelift_ret_type = type_to_cranelift(ret_type, pointer_type, None)
-                .map_err(|e| CompilerError::JitError(e))?;
+            let cranelift_ret_type = type_to_cranelift(ret_type, pointer_type, None)?;
             sig.returns.push(AbiParam::new(cranelift_ret_type));
         }
 
@@ -240,8 +269,8 @@ impl<'a, M: Module> CodegenState<'a, M> {
             .module
             .declare_function(name, Linkage::Import, &sig)
             .map_err(|e| {
-                CompilerError::JitError(format!(
-                    "Failed to declare external function {}: {}",
+                JitError::Cranelift(format!(
+                    "failed to declare external function '{}': {}",
                     name, e
                 ))
             })?;
@@ -290,26 +319,29 @@ impl<'a, M: Module> CodegenState<'a, M> {
         }
     }
 
-    fn compute_all_struct_layouts(&mut self, program: &Program) -> std::result::Result<(), String> {
+    fn compute_all_struct_layouts(&mut self, program: &Program) -> JitResult<()> {
         for item in &program.items {
             if let Item::Struct(struct_def) = item {
-                let layout = self.compute_struct_layout(struct_def)?;
+                let layout = self
+                    .compute_struct_layout(struct_def)
+                    .map_err(JitError::from)?;
                 self.struct_layouts.insert(struct_def.name.clone(), layout);
             }
         }
         Ok(())
     }
 
-    fn declare_all_functions(&mut self, program: &Program) -> std::result::Result<(), String> {
+    fn declare_all_functions(&mut self, program: &Program) -> JitResult<()> {
         for item in &program.items {
             match item {
                 Item::Function(func) => {
-                    self.declare_function(func)?;
+                    self.declare_function(func).map_err(JitError::from)?;
                 }
                 Item::Impl(impl_block) => {
                     for method in &impl_block.methods {
-                        self.declare_function(method)?;
-                        self.register_method_aliases(&impl_block.struct_name, method)?;
+                        self.declare_function(method).map_err(JitError::from)?;
+                        self.register_method_aliases(&impl_block.struct_name, method)
+                            .map_err(JitError::from)?;
                     }
                 }
                 Item::ExternBlock(block) => {
@@ -318,29 +350,28 @@ impl<'a, M: Module> CodegenState<'a, M> {
                             &extern_item.name,
                             extern_item.params.clone(),
                             extern_item.return_type.clone(),
-                        )
-                        .map_err(|err| err.to_string())?;
+                        )?;
                     }
                 }
-                Item::Use(_) => {}
+                Item::Use(_) | Item::Attribute(_) => {}
                 _ => {}
             }
         }
         Ok(())
     }
 
-    fn compile_all_functions(&mut self, program: &Program) -> std::result::Result<(), String> {
+    fn compile_all_functions(&mut self, program: &Program) -> JitResult<()> {
         for item in &program.items {
             match item {
                 Item::Function(func) => {
-                    self.compile_function(func)?;
+                    self.compile_function(func).map_err(JitError::from)?;
                 }
                 Item::Impl(impl_block) => {
                     for method in &impl_block.methods {
-                        self.compile_function(method)?;
+                        self.compile_function(method).map_err(JitError::from)?;
                     }
                 }
-                Item::Struct(_) | Item::ExternBlock(_) | Item::Use(_) => {}
+                Item::Struct(_) | Item::ExternBlock(_) | Item::Use(_) | Item::Attribute(_) => {}
                 Item::Import(import) => {
                     let module_name = import.path.join("::");
 
@@ -358,14 +389,13 @@ impl<'a, M: Module> CodegenState<'a, M> {
                             .collect();
 
                         for (func_name, params, return_type) in functions_to_register {
-                            self.register_external_function(&func_name, params, return_type)
-                                .map_err(|err| err.to_string())?;
+                            self.register_external_function(&func_name, params, return_type)?;
                         }
                     } else {
-                        return Err(format!(
-                            "Module '{}' not found in module registry",
+                        return Err(JitError::ModuleRegistry(format!(
+                            "module '{}' not found in module registry",
                             module_name
-                        ));
+                        )));
                     }
                 }
             }
@@ -373,41 +403,35 @@ impl<'a, M: Module> CodegenState<'a, M> {
         Ok(())
     }
 
-    fn compile_program(&mut self, program: &Program) -> Result<String> {
+    fn compile_program(&mut self, program: &Program) -> JitResult<String> {
         if let Some(namespace_decl) = &program.namespace {
             *self.current_namespace = Some(namespace_decl.namespace.clone());
         }
 
         self.reset_struct_state();
         self.register_struct_definitions(program);
-        self.compute_all_struct_layouts(program)
-            .map_err(|e| CompilerError::JitError(e))?;
-        self.declare_all_functions(program)
-            .map_err(|e| CompilerError::JitError(e))?;
-        self.compile_all_functions(program)
-            .map_err(|e| CompilerError::JitError(e))?;
+        self.compute_all_struct_layouts(program)?;
+        self.declare_all_functions(program)?;
+        self.compile_all_functions(program)?;
 
         Ok(self.resolve_function_name("main"))
     }
 
-    fn compile_module(&mut self, program: &Program) -> Result<()> {
+    fn compile_module(&mut self, program: &Program) -> JitResult<()> {
         if let Some(namespace_decl) = &program.namespace {
             *self.current_namespace = Some(namespace_decl.namespace.clone());
         }
 
         self.reset_struct_state();
         self.register_struct_definitions(program);
-        self.compute_all_struct_layouts(program)
-            .map_err(|e| CompilerError::JitError(e))?;
-        self.declare_all_functions(program)
-            .map_err(|e| CompilerError::JitError(e))?;
-        self.compile_all_functions(program)
-            .map_err(|e| CompilerError::JitError(e))?;
+        self.compute_all_struct_layouts(program)?;
+        self.declare_all_functions(program)?;
+        self.compile_all_functions(program)?;
 
         if let Some(namespace) = self.current_namespace.clone() {
             let external_module = self
                 .extract_module_metadata(&namespace, program)
-                .map_err(|e| CompilerError::JitError(e))?;
+                .map_err(JitError::from)?;
             self.module_registry.register_module(external_module);
         }
 
@@ -447,6 +471,7 @@ impl<'a, M: Module> CodegenState<'a, M> {
                         }
                     }
                 }
+                Item::Attribute(_) => {}
                 _ => {}
             }
         }
@@ -746,7 +771,7 @@ impl Default for EngineSettings {
         Self {
             opt_level: settings::OptLevel::None,
             enable_verifier: false,
-            is_pic: cfg!(target_os = "macos"),
+            is_pic: !cfg!(target_os = "macos"),
         }
     }
 }
@@ -809,6 +834,10 @@ impl ObjectEngine {
         }
     }
 
+    fn map_jit(err: JitError) -> CompilerError {
+        CompilerError::AotError(err.to_string())
+    }
+
     fn create_module(settings: &EngineSettings) -> Result<ObjectModule> {
         let mut flag_builder = settings::builder();
         settings
@@ -862,7 +891,7 @@ impl ObjectEngine {
         self.current_namespace = None;
 
         self.with_state(|state| state.register_runtime_intrinsics())
-            .map_err(Self::map_error)?;
+            .map_err(Self::map_jit)?;
         Ok(())
     }
 
@@ -882,13 +911,13 @@ impl ObjectEngine {
     pub fn compile_program(&mut self, program: &Program) -> Result<ObjectCompileOutput> {
         let entry_symbol = self
             .with_state(|state| state.compile_program(program))
-            .map_err(Self::map_error)?;
+            .map_err(Self::map_jit)?;
         self.finalize_object(Some(entry_symbol))
     }
 
     pub fn compile_module(&mut self, program: &Program) -> Result<ObjectCompileOutput> {
         self.with_state(|state| state.compile_module(program))
-            .map_err(Self::map_error)?;
+            .map_err(Self::map_jit)?;
         self.finalize_object(None)
     }
 
@@ -939,7 +968,7 @@ impl EngineSettings {
         let mut settings = Self {
             opt_level,
             enable_verifier: config.debug_info,
-            is_pic: cfg!(target_os = "macos"),
+            is_pic: !cfg!(target_os = "macos"),
         };
 
         if let Some(pic_flag) = config.flags.get("pic") {
@@ -1085,11 +1114,14 @@ impl JitEngine {
         return_type: Option<flow_ast::Type>,
     ) -> Result<()> {
         self.with_state(|state| state.register_external_function(name, params, return_type))
+            .map_err(CompilerError::from)
     }
 
     /// Compile a complete program and return the main function pointer
     pub fn compile(&mut self, program: &Program) -> Result<*const u8> {
-        let main_symbol = self.with_state(|state| state.compile_program(program))?;
+        let main_symbol = self
+            .with_state(|state| state.compile_program(program))
+            .map_err(CompilerError::from)?;
         let main_id = self
             .module
             .get_name(&main_symbol)
@@ -1115,6 +1147,7 @@ impl JitEngine {
     /// Compile a module (library) without requiring a main function
     pub fn compile_module(&mut self, program: &Program) -> Result<()> {
         self.with_state(|state| state.compile_module(program))
+            .map_err(CompilerError::from)
     }
 
     pub fn get_module_registry(&self) -> &ModuleRegistry {
@@ -1465,9 +1498,13 @@ fn compile_expression(
                         name
                     ));
                 }
+                let max_align = pointer_type.bytes().max(1);
+                let align = slot_size.next_power_of_two().min(max_align);
+                let align_shift = align.trailing_zeros() as u8;
                 let slot = builder.create_sized_stack_slot(StackSlotData::new(
                     StackSlotKind::ExplicitSlot,
                     u32::from(slot_size),
+                    align_shift,
                 ));
                 builder.ins().stack_store(value_val, slot, 0);
                 VariableBinding::Mutable {
@@ -1520,13 +1557,15 @@ fn compile_expression(
             let else_block = else_.as_ref().map(|_| builder.create_block());
 
             if let Some(else_blk) = else_block {
+                let empty_args: &[BlockArg] = &[];
                 builder
                     .ins()
-                    .brif(cond_bool, then_block, &[], else_blk, &[]);
+                    .brif(cond_bool, then_block, empty_args, else_blk, empty_args);
             } else {
+                let empty_args: &[BlockArg] = &[];
                 builder
                     .ins()
-                    .brif(cond_bool, then_block, &[], merge_block, &[]);
+                    .brif(cond_bool, then_block, empty_args, merge_block, empty_args);
             }
 
             let mut merge_param_ty: Option<types::Type> = None;
@@ -1543,9 +1582,11 @@ fn compile_expression(
                 merge_param_ty = Some(then_ty);
             }
             if else_block.is_some() {
-                builder.ins().jump(merge_block, &[then_value]);
+                let then_args = [BlockArg::from(then_value)];
+                builder.ins().jump(merge_block, then_args.as_slice());
             } else {
-                builder.ins().jump(merge_block, &[]);
+                let empty_args: &[BlockArg] = &[];
+                builder.ins().jump(merge_block, empty_args);
             }
             builder.seal_block(then_block);
 
@@ -1565,7 +1606,8 @@ fn compile_expression(
                     merge_param_ty = Some(else_ty);
                 }
 
-                builder.ins().jump(merge_block, &[else_value]);
+                let else_args = [BlockArg::from(else_value)];
+                builder.ins().jump(merge_block, else_args.as_slice());
                 builder.seal_block(else_blk);
             }
 
@@ -1932,6 +1974,7 @@ mod tests {
                 },
             ],
             is_pub: true,
+            attributes: vec![],
         };
 
         let layout = engine
@@ -1957,6 +2000,7 @@ mod tests {
                 is_pub: true,
             }],
             is_pub: true,
+            attributes: vec![],
         };
 
         let outer = Struct {
@@ -1967,6 +2011,7 @@ mod tests {
                 is_pub: true,
             }],
             is_pub: true,
+            attributes: vec![],
         };
 
         engine.struct_defs.insert(inner.name.clone(), inner.clone());

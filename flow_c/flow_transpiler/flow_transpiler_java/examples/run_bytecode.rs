@@ -59,6 +59,8 @@ fn main() {
                 right: Box::new(Expr::Integer(7)),
             },
             is_pub: true,
+            is_macro: false,
+            attributes: vec![],
             span: dummy_span(),
         })],
     };
@@ -128,6 +130,8 @@ public class RunCalculator {
                     right: Box::new(Expr::Integer(3)),
                 },
                 is_pub: false,
+                is_macro: false,
+                attributes: vec![],
                 span: dummy_span(),
             }),
             Item::Function(Function {
@@ -143,6 +147,8 @@ public class RunCalculator {
                     right: Box::new(Expr::Integer(10)),
                 },
                 is_pub: false,
+                is_macro: false,
+                attributes: vec![],
                 span: dummy_span(),
             }),
             Item::Function(Function {
@@ -157,6 +163,8 @@ public class RunCalculator {
                     }),
                 },
                 is_pub: true,
+                is_macro: false,
+                attributes: vec![],
                 span: dummy_span(),
             }),
         ],

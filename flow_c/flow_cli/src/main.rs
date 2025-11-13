@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 use console::style;
+use flow_ast::{Diagnostic as FlowDiagnostic, LabelStyle as FlowLabelStyle};
 use flow_compiler::{CompilationTarget, CompilerConfig, FlowCompilerBuilder};
 use flow_parser::Parser as FlowParser;
 use flow_transpiler::Transpiler;
@@ -15,7 +16,7 @@ use std::os::unix::fs::PermissionsExt;
 
 mod error_reporter;
 
-use error_reporter::{ErrorReporter, ErrorSpan, RichError, SpanStyle, Suggestion};
+use error_reporter::{ErrorReporter, ErrorSpan, Replacement, RichError, SpanStyle, Suggestion};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -157,12 +158,13 @@ fn run_file(path: &PathBuf, show_stats: bool, verbose: bool, quiet: bool) -> Res
             spinner.finish_and_clear();
             program
         }
-        Err(e) => {
+        Err(diag) => {
             spinner.finish_and_clear();
 
             // Use rich error reporting for parse errors
-            let rich_error = parse_error_to_rich(&e, &path.to_string_lossy(), &source);
-            display_rich_errors(&[rich_error], &path.to_string_lossy(), &source);
+            let path_str = path.to_string_lossy().to_string();
+            let rich_error = diagnostic_to_rich(&diag, &path_str);
+            display_rich_errors(&[rich_error], &path_str, &source);
 
             return Err("Parse failed".to_string());
         }
@@ -273,14 +275,19 @@ fn build_file(
     // Parsing
     let spinner = create_spinner("Parsing...", quiet);
     let mut parser = FlowParser::new(&source);
-    let program = parser.parse().map_err(|e| {
-        spinner.finish_and_clear();
-        format!(
-            "Parse error at {}..{}: {}",
-            e.span.start, e.span.end, e.message
-        )
-    })?;
-    spinner.finish_and_clear();
+    let program = match parser.parse() {
+        Ok(program) => {
+            spinner.finish_and_clear();
+            program
+        }
+        Err(diag) => {
+            spinner.finish_and_clear();
+            let path_str = path.to_string_lossy().to_string();
+            let rich = diagnostic_to_rich(&diag, &path_str);
+            display_rich_errors(&[rich], &path_str, &source);
+            return Err("Parsing failed".to_string());
+        }
+    };
 
     if !quiet {
         println!(
@@ -438,11 +445,19 @@ fn transpile_file(
     // Parsing
     let spinner = create_spinner("Parsing...", quiet);
     let mut parser = FlowParser::new(&source);
-    let program = parser.parse().map_err(|e| {
-        spinner.finish_and_clear();
-        format!("Parse error: {:?}", e)
-    })?;
-    spinner.finish_and_clear();
+    let program = match parser.parse() {
+        Ok(program) => {
+            spinner.finish_and_clear();
+            program
+        }
+        Err(diag) => {
+            spinner.finish_and_clear();
+            let rich = diagnostic_to_rich(&diag, path.to_string_lossy().as_ref());
+            let path_str = path.to_string_lossy().to_string();
+            display_rich_errors(&[rich], &path_str, &source);
+            return Err("Parsing failed".to_string());
+        }
+    };
 
     if !quiet {
         println!("  {} Parsed successfully", "✓".green().bold());
@@ -572,14 +587,19 @@ fn check_file(path: &PathBuf, show_ast: bool, verbose: bool, quiet: bool) -> Res
 
     let spinner = create_spinner("Parsing...", quiet);
     let mut parser = FlowParser::new(&source);
-    let program = parser.parse().map_err(|e| {
-        spinner.finish_and_clear();
-        format!(
-            "Parse error at {}..{}: {}",
-            e.span.start, e.span.end, e.message
-        )
-    })?;
-    spinner.finish_and_clear();
+    let program = match parser.parse() {
+        Ok(program) => {
+            spinner.finish_and_clear();
+            program
+        }
+        Err(diag) => {
+            spinner.finish_and_clear();
+            let path_str = path.to_string_lossy().to_string();
+            let rich = diagnostic_to_rich(&diag, &path_str);
+            display_rich_errors(&[rich], &path_str, &source);
+            return Err("Parsing failed".to_string());
+        }
+    };
 
     if !quiet {
         println!("  {} No errors found", "✓".green().bold());
@@ -678,7 +698,10 @@ fn start_repl(show_ast: bool, _verbose: bool, quiet: bool) -> Result<(), String>
                     Err(e) => eprintln!("{} {}", "✗".red().bold(), e.red()),
                 }
             }
-            Err(e) => eprintln!("{} {}", "✗".red().bold(), e.message.red()),
+            Err(diag) => {
+                let rich = diagnostic_to_rich(&diag, "<repl>");
+                display_rich_errors(&[rich], "<repl>", &wrapped);
+            }
         }
     }
 
@@ -705,45 +728,82 @@ fn create_spinner(msg: &str, quiet: bool) -> ProgressBar {
     }
 }
 
-/// Convert a parse error to a rich error with suggestions
-fn parse_error_to_rich(
-    error: &flow_parser::ParseError,
-    file_path: &str,
-    _source: &str,
-) -> RichError {
-    let mut suggestions = Vec::new();
+/// Convert a diagnostic to a rich error with suggestions
+fn diagnostic_to_rich(diagnostic: &FlowDiagnostic, fallback_file: &str) -> RichError {
+    let mut primary_span: Option<ErrorSpan> = None;
+    let mut secondary_spans = Vec::new();
 
-    // Add specific suggestions based on the error message
-    if error.message.contains("Expected identifier") {
-        suggestions.push(Suggestion {
-            message: "identifiers must start with a letter or underscore, followed by letters, digits, or underscores".to_string(),
-            replacements: vec![],
-        });
-    } else if error.message.contains("Expected type") {
-        suggestions.push(Suggestion {
-            message: "try using a basic type like 'i64', 'f64', 'bool', or 'string'".to_string(),
-            replacements: vec![],
-        });
-    } else if error.message.contains("Expected ';'") {
-        suggestions.push(Suggestion {
-            message: "add a semicolon at the end of the statement".to_string(),
-            replacements: vec![],
-        });
+    for label in &diagnostic.labels {
+        let file = label
+            .span
+            .file
+            .clone()
+            .unwrap_or_else(|| fallback_file.to_string());
+
+        let span = ErrorSpan {
+            start: label.span.start,
+            end: label.span.end,
+            file: Some(file),
+            label: label.message.clone(),
+            style: match label.style {
+                FlowLabelStyle::Primary => SpanStyle::Primary,
+                FlowLabelStyle::Secondary => SpanStyle::Secondary,
+                FlowLabelStyle::Help => SpanStyle::Help,
+                FlowLabelStyle::Note => SpanStyle::Note,
+            },
+        };
+
+        match label.style {
+            FlowLabelStyle::Primary => primary_span = Some(span),
+            _ => secondary_spans.push(span),
+        }
     }
 
+    let primary_span = primary_span.unwrap_or_else(|| ErrorSpan {
+        start: 0,
+        end: 0,
+        file: Some(fallback_file.to_string()),
+        label: None,
+        style: SpanStyle::Primary,
+    });
+
+    let suggestions = diagnostic
+        .suggestions
+        .iter()
+        .map(|suggestion| Suggestion {
+            message: suggestion.message.clone(),
+            replacements: suggestion
+                .replacements
+                .iter()
+                .map(|replacement| {
+                    let file = replacement
+                        .span
+                        .file
+                        .clone()
+                        .unwrap_or_else(|| fallback_file.to_string());
+
+                    Replacement {
+                        span: ErrorSpan {
+                            start: replacement.span.start,
+                            end: replacement.span.end,
+                            file: Some(file),
+                            label: None,
+                            style: SpanStyle::Help,
+                        },
+                        text: replacement.text.clone(),
+                    }
+                })
+                .collect(),
+        })
+        .collect();
+
     RichError {
-        title: error.message.clone(),
-        code: Some("E0001".to_string()),
-        primary_span: ErrorSpan {
-            start: error.span.start,
-            end: error.span.end,
-            file: Some(file_path.to_string()),
-            label: Some("unexpected token".to_string()),
-            style: SpanStyle::Primary,
-        },
-        secondary_spans: vec![],
+        title: diagnostic.message.clone(),
+        code: diagnostic.code.clone(),
+        primary_span,
+        secondary_spans,
         suggestions,
-        notes: vec![],
+        notes: diagnostic.notes.clone(),
     }
 }
 

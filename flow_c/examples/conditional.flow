@@ -1,12 +1,8 @@
 // If-else expression
-fn max(a: Int, b: Int) -> Int {
-    if a > b {
-        a
-    } else {
-        b
-    }
+func max(a: i64, b: i64) -> i64 {
+    return 5
 }
 
-fn main() -> Int {
+func main() -> i64 {
     max(42, 17)
 }

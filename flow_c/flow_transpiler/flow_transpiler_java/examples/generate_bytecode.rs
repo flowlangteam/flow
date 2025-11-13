@@ -51,6 +51,8 @@ fn main() {
             return_type: Some(Type::I64),
             body: Expr::Integer(42),
             is_pub: true,
+            is_macro: false,
+            attributes: vec![],
             span: dummy_span(),
         })],
     };
@@ -120,6 +122,8 @@ fn main() {
                 right: Box::new(Expr::Ident("b".to_string())),
             },
             is_pub: true,
+            is_macro: false,
+            attributes: vec![],
             span: dummy_span(),
         })],
     };
@@ -161,6 +165,8 @@ fn main() {
                     right: Box::new(Expr::Integer(2)),
                 },
                 is_pub: false,
+                is_macro: false,
+                attributes: vec![],
                 span: dummy_span(),
             }),
             Item::Function(Function {
@@ -172,6 +178,8 @@ fn main() {
                     right: Box::new(Expr::Ident("double".to_string())),
                 },
                 is_pub: true,
+                is_macro: false,
+                attributes: vec![],
                 span: dummy_span(),
             }),
         ],

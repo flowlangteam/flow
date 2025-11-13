@@ -1,5 +1,8 @@
 use std::collections::HashMap;
 
+pub mod diagnostic;
+pub use diagnostic::*;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
     pub namespace: Option<NamespaceDecl>,
@@ -14,6 +17,7 @@ pub enum Item {
     ExternBlock(ExternBlock),
     Import(Import),
     Use(UseDecl),
+    Attribute(Attribute),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -36,6 +40,8 @@ pub struct Function {
     pub return_type: Option<Type>,
     pub body: Expr,
     pub is_pub: bool,
+    pub is_macro: bool,
+    pub attributes: Vec<AttributeApplication>,
     pub span: Span,
 }
 
@@ -50,6 +56,7 @@ pub struct Struct {
     pub name: String,
     pub fields: Vec<Field>,
     pub is_pub: bool,
+    pub attributes: Vec<AttributeApplication>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -82,6 +89,20 @@ pub struct ExternItem {
 pub struct Import {
     pub path: Vec<String>,
     pub alias: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Attribute {
+    pub name: String,
+    pub params: Vec<String>,
+    pub body: Expr,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct AttributeApplication {
+    pub name: String,
+    pub args: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -265,7 +286,7 @@ pub enum Warning {
     ShadowedVariable { name: String, span: Span },
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Span {
     pub start: usize,
     pub end: usize,

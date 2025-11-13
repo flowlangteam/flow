@@ -114,6 +114,7 @@ impl Analyzer {
                 Item::Use(use_decl) => {
                     self.process_use_declaration(use_decl)?;
                 }
+                Item::Attribute(_) => {}
                 Item::Import(_) | Item::ExternBlock(_) | Item::Impl(_) => {
                     // These are handled in the second pass or don't need first-pass processing
                 }
@@ -129,6 +130,7 @@ impl Analyzer {
                 Item::Impl(impl_block) => {
                     self.analyze_impl(impl_block)?;
                 }
+                Item::Attribute(_) => {}
                 _ => {}
             }
         }
@@ -222,14 +224,24 @@ impl Analyzer {
         })?;
 
         let mut parser = flow_parser::Parser::new(&source);
-        let module_program = parser.parse().map_err(|e| {
+        let module_program = parser.parse().map_err(|diagnostic| {
+            let mut span = diagnostic
+                .labels
+                .iter()
+                .find(|label| matches!(label.style, LabelStyle::Primary))
+                .map(|label| label.span.clone())
+                .unwrap_or_else(|| Span::new(0, 0));
+
+            if span.file.is_none() {
+                span.file = Some(module_file_path.to_string_lossy().to_string());
+            }
+
             vec![AnalysisError {
-                message: format!("Failed to parse module {}: {}", module_key, e.message),
-                span: Span {
-                    start: e.span.start,
-                    end: e.span.end,
-                    file: Some(module_file_path.to_string_lossy().to_string()),
-                },
+                message: format!(
+                    "Failed to parse module {}: {}",
+                    module_key, diagnostic.message
+                ),
+                span,
                 severity: Severity::Error,
             }]
         })?;
@@ -1342,6 +1354,8 @@ mod tests {
                     then: Box::new(Expr::Integer(0)),
                 },
                 is_pub: true,
+                is_macro: false,
+                attributes: vec![],
                 span: Span::new(0, 0),
             })],
         };
@@ -1362,6 +1376,8 @@ mod tests {
                 return_type: Some(Type::I64),
                 body: Expr::Bool(true),
                 is_pub: true,
+                is_macro: false,
+                attributes: vec![],
                 span: Span::new(0, 0),
             })],
         };
@@ -1398,6 +1414,8 @@ mod tests {
                     right: Box::new(Expr::Ident("y".to_string())),
                 },
                 is_pub: true,
+                is_macro: false,
+                attributes: vec![],
                 span: Span::new(0, 0),
             })],
         };
@@ -1425,6 +1443,8 @@ mod tests {
                     return_type: Some(Type::I64),
                     body: Expr::Integer(42),
                     is_pub: false,
+                    is_macro: false,
+                    attributes: vec![],
                     span: Span::new(0, 0),
                 }),
             ],
@@ -1474,6 +1494,8 @@ mod tests {
                     args: vec![Expr::Ident("x".to_string())],
                 },
                 is_pub: false,
+                is_macro: false,
+                attributes: vec![],
                 span: Span::new(0, 0),
             })],
         };

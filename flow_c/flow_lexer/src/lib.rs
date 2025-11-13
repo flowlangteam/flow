@@ -44,6 +44,8 @@ pub enum Token {
     Use,
     #[token("pub")]
     Pub,
+    #[token("attr")]
+    Attr,
     #[token("self")]
     SelfKw,
     #[token("Self")]
@@ -136,6 +138,12 @@ pub enum Token {
     Dot,
     #[token("..")]
     DotDot,
+    #[token("##")]
+    DoubleHash,
+    #[token("$")]
+    Dollar,
+    #[token("#")]
+    Hash,
 
     // Delimiters
     #[token("(")]

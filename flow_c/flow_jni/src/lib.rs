@@ -88,10 +88,17 @@ pub extern "system" fn Java_flow_bridge_FlowBridge_compileFlow(
     let mut parser = Parser::new(&source_str);
     let ast = match parser.parse() {
         Ok(ast) => ast,
-        Err(e) => {
+        Err(diagnostic) => {
+            let location = diagnostic
+                .labels
+                .iter()
+                .find(|label| matches!(label.style, flow_ast::LabelStyle::Primary))
+                .map(|label| format!(" at {}..{}", label.span.start, label.span.end))
+                .unwrap_or_default();
+
             let _ = env.throw_new(
                 "java/lang/RuntimeException",
-                format!("Parser error: {:?}", e),
+                format!("Parser error{}: {}", location, diagnostic.message),
             );
             return -1;
         }

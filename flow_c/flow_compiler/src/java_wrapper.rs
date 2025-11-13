@@ -108,6 +108,7 @@ impl FlowCompiler for JavaTranspilerWrapper {
                         flow_ast::Item::Import(import) => {
                             dependencies.push(import.path.join("::"));
                         }
+                        flow_ast::Item::Attribute(_) => {}
                         _ => {}
                     }
                 }

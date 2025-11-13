@@ -49,6 +49,8 @@ fn main() {
             return_type: Some(Type::I64),
             body: Expr::Integer(42),
             is_pub: true,
+            is_macro: false,
+            attributes: vec![],
             span: dummy_span(),
         })],
     };

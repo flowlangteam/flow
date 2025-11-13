@@ -1,24 +1,29 @@
-use flow_ast::*;
+use flow_ast::{Diagnostic, DiagnosticSeverity, Label, LabelStyle, Span, *};
 use flow_lexer::{Lexer, Token};
 use std::collections::HashMap;
 
-type ParseResult<T> = Result<T, ParseError>;
+type ParseResult<T> = Result<T, Diagnostic>;
 
-#[derive(Debug, Clone)]
-pub struct ParseError {
-    pub message: String,
-    pub span: std::ops::Range<usize>,
+#[derive(Clone)]
+struct MacroDef {
+    params: Vec<Param>,
+    body: Expr,
 }
 
 pub struct Parser {
     tokens: Vec<(Token, std::ops::Range<usize>)>,
     pos: usize,
+    macros: HashMap<String, MacroDef>,
 }
 
 impl Parser {
     pub fn new(source: &str) -> Self {
         let tokens: Vec<_> = Lexer::new(source).collect();
-        Self { tokens, pos: 0 }
+        Self {
+            tokens,
+            pos: 0,
+            macros: HashMap::new(),
+        }
     }
 
     pub fn parse(&mut self) -> ParseResult<Program> {
@@ -33,10 +38,24 @@ impl Parser {
         while !self.is_at_end() {
             items.push(self.parse_item()?);
         }
+        self.build_program(namespace, items)
+    }
+
+    fn build_program(
+        &self,
+        namespace: Option<NamespaceDecl>,
+        items: Vec<Item>,
+    ) -> ParseResult<Program> {
         Ok(Program { namespace, items })
     }
 
     fn parse_item(&mut self) -> ParseResult<Item> {
+        // Parse #[attribute] annotations
+        let mut attributes = Vec::new();
+        while self.check(&Token::Hash) {
+            attributes.push(self.parse_attribute_application()?);
+        }
+
         let is_pub = if self.check(&Token::Pub) {
             self.advance();
             true
@@ -44,18 +63,35 @@ impl Parser {
             false
         };
 
+        // Check for ##macro marker on functions
+        let is_macro = if self.check(&Token::DoubleHash) {
+            self.advance();
+            true
+        } else {
+            false
+        };
+
         match self.peek() {
-            Some(Token::Func) => Ok(Item::Function(self.parse_function(is_pub)?)),
-            Some(Token::Struct) => Ok(Item::Struct(self.parse_struct(is_pub)?)),
+            Some(Token::Func) => Ok(Item::Function(self.parse_function(is_pub, is_macro, attributes)?)),
+            Some(Token::Struct) => Ok(Item::Struct(self.parse_struct(is_pub, attributes)?)),
             Some(Token::Impl) => Ok(Item::Impl(self.parse_impl()?)),
             Some(Token::Extern) => Ok(Item::ExternBlock(self.parse_extern_block()?)),
             Some(Token::Import) => Ok(Item::Import(self.parse_import()?)),
             Some(Token::Use) => Ok(Item::Use(self.parse_use_declaration()?)),
-            _ => Err(self.error("Expected item (func, struct, impl, extern, import, or use)")),
+            Some(Token::Attr) => self.parse_attribute_definition(is_pub).map(Item::Attribute),
+            _ => {
+                if is_macro {
+                    Err(self.error("##macro marker can only be applied to functions"))
+                } else if !attributes.is_empty() {
+                    Err(self.error("Attributes can only be applied to functions and structs"))
+                } else {
+                    Err(self.error("Expected item (func, struct, impl, extern, import, use, or attr)"))
+                }
+            }
         }
     }
 
-    fn parse_function(&mut self, is_pub: bool) -> ParseResult<Function> {
+    fn parse_function(&mut self, is_pub: bool, is_macro: bool, attributes: Vec<AttributeApplication>) -> ParseResult<Function> {
         let start_pos = self.pos;
         self.expect(&Token::Func)?;
         let name = self.expect_ident()?;
@@ -74,12 +110,22 @@ impl Parser {
         let body = self.parse_block_or_expr()?;
         let span = self.span_from(start_pos);
 
+        // Register macro if marked with ##macro
+        if is_macro {
+            self.macros.insert(name.clone(), MacroDef {
+                params: params.clone(),
+                body: body.clone(),
+            });
+        }
+
         Ok(Function {
             name,
             params,
             return_type,
             body,
             is_pub,
+            is_macro,
+            attributes,
             span,
         })
     }
@@ -239,7 +285,7 @@ impl Parser {
         }
     }
 
-    fn parse_struct(&mut self, is_pub: bool) -> ParseResult<Struct> {
+    fn parse_struct(&mut self, is_pub: bool, attributes: Vec<AttributeApplication>) -> ParseResult<Struct> {
         self.expect(&Token::Struct)?;
         let name = self.expect_ident()?;
         self.expect(&Token::LBrace)?;
@@ -275,6 +321,7 @@ impl Parser {
             name,
             fields,
             is_pub,
+            attributes,
         })
     }
 
@@ -291,7 +338,8 @@ impl Parser {
             } else {
                 false
             };
-            methods.push(self.parse_function(is_pub)?);
+            // Impl methods don't support attributes or macro markers currently
+            methods.push(self.parse_function(is_pub, false, Vec::new())?);
         }
 
         self.expect(&Token::RBrace)?;
@@ -402,6 +450,67 @@ impl Parser {
             filename,
             alias,
         })
+    }
+
+    fn parse_attribute_definition(&mut self, is_pub: bool) -> ParseResult<Attribute> {
+        if is_pub {
+            return Err(self.error("Attribute definitions cannot be declared as public"));
+        }
+
+        let start_pos = self.pos;
+        self.expect(&Token::Attr)?;
+        let name = self.expect_ident()?;
+
+        let mut params = Vec::new();
+        if self.check(&Token::LParen) {
+            self.advance();
+            if !self.check(&Token::RParen) {
+                loop {
+                    params.push(self.expect_ident()?);
+                    if !self.check(&Token::Comma) {
+                        break;
+                    }
+                    self.advance();
+                }
+            }
+            self.expect(&Token::RParen)?;
+        }
+
+        let body = self.parse_block_or_expr()?;
+        let span = self.span_from(start_pos);
+
+        Ok(Attribute {
+            name,
+            params,
+            body,
+            span,
+        })
+    }
+
+    fn parse_attribute_application(&mut self) -> ParseResult<AttributeApplication> {
+        self.expect(&Token::Hash)?;
+        self.expect(&Token::LBracket)?;
+
+        let name = self.expect_ident()?;
+        let mut args = Vec::new();
+
+        if self.check(&Token::LParen) {
+            self.advance();
+            if !self.check(&Token::RParen) {
+                loop {
+                    args.push(self.expect_ident()?);
+                    if !self.check(&Token::Comma) {
+                        break;
+                    }
+                    self.advance();
+                }
+            }
+            self.expect(&Token::RParen)?;
+        }
+
+        self.expect(&Token::RBracket)?;
+
+        Ok(AttributeApplication { name, args })
     }
 
     fn parse_block_or_expr(&mut self) -> ParseResult<Expr> {
@@ -811,6 +920,33 @@ impl Parser {
 
     fn parse_primary(&mut self) -> ParseResult<Expr> {
         match self.peek() {
+            Some(Token::Dollar) => {
+                // $MACRO(...) invocation
+                let start_pos = self.pos;
+                self.advance();
+                let name = self.expect_ident()?;
+
+                let args = if self.check(&Token::LParen) {
+                    self.advance();
+                    let mut parsed_args = Vec::new();
+                    if !self.check(&Token::RParen) {
+                        loop {
+                            parsed_args.push(self.parse_expr()?);
+                            if !self.check(&Token::Comma) {
+                                break;
+                            }
+                            self.advance();
+                        }
+                    }
+                    self.expect(&Token::RParen)?;
+                    parsed_args
+                } else {
+                    Vec::new()
+                };
+
+                let span = self.span_from(start_pos);
+                self.expand_macro(name, args, span)
+            }
             Some(Token::Integer(n)) => {
                 let n = *n;
                 self.advance();
@@ -997,6 +1133,181 @@ impl Parser {
         Ok(Expr::Lambda { params, body })
     }
 
+    fn expand_macro(
+        &mut self,
+        name: String,
+        args: Vec<Expr>,
+        span: Span,
+    ) -> ParseResult<Expr> {
+        let definition = if let Some(def) = self.macros.get(&name) {
+            def.clone()
+        } else {
+            let mut diag = Diagnostic::new(
+                DiagnosticSeverity::Error,
+                format!("Unknown macro '{}'", name),
+            );
+            diag = diag.with_label(
+                Label::new(span.clone(), LabelStyle::Primary)
+                    .with_message("macro invocation here"),
+            );
+            return Err(diag);
+        };
+
+        if definition.params.len() != args.len() {
+            let mut diag = Diagnostic::new(
+                DiagnosticSeverity::Error,
+                format!(
+                    "Macro '{}' expects {} argument(s), got {}",
+                    name,
+                    definition.params.len(),
+                    args.len()
+                ),
+            );
+            diag = diag.with_label(
+                Label::new(span.clone(), LabelStyle::Primary)
+                    .with_message("incorrect number of arguments"),
+            );
+            return Err(diag);
+        }
+
+        let mut mapping = HashMap::new();
+        for (param, arg) in definition.params.iter().zip(args.into_iter()) {
+            mapping.insert(param.name.clone(), arg);
+        }
+
+        Ok(self.substitute_expr(&definition.body, &mapping))
+    }
+
+    fn substitute_expr(&self, template: &Expr, mapping: &HashMap<String, Expr>) -> Expr {
+        match template {
+            Expr::Integer(n) => Expr::Integer(*n),
+            Expr::Float(f) => Expr::Float(*f),
+            Expr::String(s) => Expr::String(s.clone()),
+            Expr::Bool(b) => Expr::Bool(*b),
+            Expr::Unit => Expr::Unit,
+            Expr::Ident(name) => mapping
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| Expr::Ident(name.clone())),
+            Expr::Binary { op, left, right } => Expr::Binary {
+                op: *op,
+                left: Box::new(self.substitute_expr(left, mapping)),
+                right: Box::new(self.substitute_expr(right, mapping)),
+            },
+            Expr::Unary { op, expr } => Expr::Unary {
+                op: *op,
+                expr: Box::new(self.substitute_expr(expr, mapping)),
+            },
+            Expr::Call { func, args } => Expr::Call {
+                func: Box::new(self.substitute_expr(func, mapping)),
+                args: args
+                    .iter()
+                    .map(|arg| self.substitute_expr(arg, mapping))
+                    .collect(),
+            },
+            Expr::Lambda { params, body } => Expr::Lambda {
+                params: params.clone(),
+                body: Box::new(self.substitute_expr(body, mapping)),
+            },
+            Expr::Let {
+                name,
+                mutable,
+                ty,
+                value,
+                then,
+            } => Expr::Let {
+                name: name.clone(),
+                mutable: *mutable,
+                ty: ty.clone(),
+                value: Box::new(self.substitute_expr(value, mapping)),
+                then: Box::new(self.substitute_expr(then, mapping)),
+            },
+            Expr::Assign { target, value } => Expr::Assign {
+                target: Box::new(self.substitute_expr(target, mapping)),
+                value: Box::new(self.substitute_expr(value, mapping)),
+            },
+            Expr::If { cond, then, else_ } => Expr::If {
+                cond: Box::new(self.substitute_expr(cond, mapping)),
+                then: Box::new(self.substitute_expr(then, mapping)),
+                else_: else_
+                    .as_ref()
+                    .map(|expr| Box::new(self.substitute_expr(expr, mapping))),
+            },
+            Expr::Match { expr, arms } => Expr::Match {
+                expr: Box::new(self.substitute_expr(expr, mapping)),
+                arms: arms
+                    .iter()
+                    .map(|arm| MatchArm {
+                        pattern: arm.pattern.clone(),
+                        guard: arm.guard.as_ref().map(|g| self.substitute_expr(g, mapping)),
+                        body: self.substitute_expr(&arm.body, mapping),
+                    })
+                    .collect(),
+            },
+            Expr::Block(exprs) => Expr::Block(
+                exprs
+                    .iter()
+                    .map(|expr| self.substitute_expr(expr, mapping))
+                    .collect(),
+            ),
+            Expr::Field { expr, field } => Expr::Field {
+                expr: Box::new(self.substitute_expr(expr, mapping)),
+                field: field.clone(),
+            },
+            Expr::Method { expr, method, args } => Expr::Method {
+                expr: Box::new(self.substitute_expr(expr, mapping)),
+                method: method.clone(),
+                args: args
+                    .iter()
+                    .map(|arg| self.substitute_expr(arg, mapping))
+                    .collect(),
+            },
+            Expr::StructInit { name, fields } => {
+                let mut new_fields = HashMap::new();
+                for (field_name, field_expr) in fields.iter() {
+                    new_fields.insert(
+                        field_name.clone(),
+                        self.substitute_expr(field_expr, mapping),
+                    );
+                }
+                Expr::StructInit {
+                    name: name.clone(),
+                    fields: new_fields,
+                }
+            }
+            Expr::Pipe { left, right } => Expr::Pipe {
+                left: Box::new(self.substitute_expr(left, mapping)),
+                right: Box::new(self.substitute_expr(right, mapping)),
+            },
+            Expr::Return(value) => Expr::Return(
+                value
+                    .as_ref()
+                    .map(|expr| Box::new(self.substitute_expr(expr, mapping))),
+            ),
+            Expr::Alloc { ty, count } => Expr::Alloc {
+                ty: ty.clone(),
+                count: count
+                    .as_ref()
+                    .map(|expr| Box::new(self.substitute_expr(expr, mapping))),
+            },
+            Expr::Free { ptr } => Expr::Free {
+                ptr: Box::new(self.substitute_expr(ptr, mapping)),
+            },
+            Expr::Ref { expr } => Expr::Ref {
+                expr: Box::new(self.substitute_expr(expr, mapping)),
+            },
+            Expr::Deref { expr } => Expr::Deref {
+                expr: Box::new(self.substitute_expr(expr, mapping)),
+            },
+            Expr::TempScope { body } => Expr::TempScope {
+                body: Box::new(self.substitute_expr(body, mapping)),
+            },
+            Expr::Unsafe { body } => Expr::Unsafe {
+                body: Box::new(self.substitute_expr(body, mapping)),
+            },
+        }
+    }
+
     // Helper methods
     fn peek(&self) -> Option<&Token> {
         self.tokens.get(self.pos).map(|(t, _)| t)
@@ -1091,8 +1402,8 @@ impl Parser {
         }
     }
 
-    fn error(&self, message: &str) -> ParseError {
-        let span = if let Some((_, span)) = self.tokens.get(self.pos) {
+    fn error(&self, message: &str) -> Diagnostic {
+        let range = if let Some((_, span)) = self.tokens.get(self.pos) {
             span.clone()
         } else if let Some((_, span)) = self.tokens.last() {
             span.end..span.end
@@ -1100,10 +1411,10 @@ impl Parser {
             0..0
         };
 
-        ParseError {
-            message: message.to_string(),
-            span,
-        }
+        let span = Span::new(range.start, range.end);
+
+        Diagnostic::new(DiagnosticSeverity::Error, message.to_string())
+            .with_label(Label::new(span, LabelStyle::Primary).with_message("unexpected token"))
     }
 }
 
@@ -1221,6 +1532,50 @@ mod tests {
                 assert_eq!(use_decl.alias, Some("calculator".to_string()));
             }
             _ => panic!("Expected Use item"),
+        }
+    }
+
+    #[test]
+    fn test_attribute_macro_expansion() {
+        let source = r#"
+            ##func add1(x: i64) -> i64 { x + 1 }
+
+            func main() -> i64 {
+                $add1(41)
+            }
+        "#;
+
+        let mut parser = Parser::new(source);
+        let program = parser.parse().unwrap();
+
+        assert_eq!(program.items.len(), 2);
+
+        match &program.items[0] {
+            Item::Function(func) => {
+                assert_eq!(func.name, "add1");
+                assert!(func.is_macro);
+            }
+            _ => panic!("Expected macro Function item"),
+        }
+
+        match &program.items[1] {
+            Item::Function(func) => {
+                if let Expr::Binary { left, right, .. } = &func.body {
+                    match left.as_ref() {
+                        Expr::Integer(value) => assert_eq!(*value, 41),
+                        other => {
+                            panic!("Expected macro substitution into literal, got {:?}", other)
+                        }
+                    }
+                    match right.as_ref() {
+                        Expr::Integer(value) => assert_eq!(*value, 1),
+                        other => panic!("Expected literal 1 on right-hand side, got {:?}", other),
+                    }
+                } else {
+                    panic!("Expected binary expression in macro-expanded body");
+                }
+            }
+            _ => panic!("Expected Function item"),
         }
     }
 

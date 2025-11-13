@@ -746,6 +746,7 @@ impl Transpiler for JavaTranspiler {
                         self.context.add_method(&impl_block.struct_name, method);
                     }
                 }
+                Item::Attribute(_) => {}
                 _ => {}
             }
         }
@@ -792,6 +793,7 @@ impl Transpiler for JavaTranspiler {
                         )));
                     }
                 }
+                Item::Attribute(_) => {}
                 _ => {}
             }
         }
@@ -852,6 +854,8 @@ mod tests {
                 return_type: Some(Type::I64),
                 body: Expr::Integer(42),
                 is_pub: true,
+                is_macro: false,
+                attributes: vec![],
                 span: dummy_span(),
             })],
         };
@@ -881,6 +885,7 @@ mod tests {
                 },
             ],
             is_pub: true,
+            attributes: vec![],
         };
 
         let method = Function {
@@ -916,6 +921,8 @@ mod tests {
                 }),
             },
             is_pub: true,
+            is_macro: false,
+            attributes: vec![],
             span: dummy_span(),
         };
 
@@ -941,6 +948,8 @@ mod tests {
                 }),
             }]),
             is_pub: true,
+            is_macro: false,
+            attributes: vec![],
             span: dummy_span(),
         };
 
