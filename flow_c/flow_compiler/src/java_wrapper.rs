@@ -125,6 +125,7 @@ impl FlowCompiler for JavaTranspilerWrapper {
                     dependencies,
                     target: CompilationTarget::JavaBytecode,
                     data: bytecode,
+                    entry_symbol: None,
                 })
             }
             Err(e) => Err(CompilerError::TranspileError(format!(

@@ -104,6 +104,7 @@ impl FlowCompiler for AotCompilerWrapper {
                     dependencies,
                     target: CompilationTarget::Native,
                     data: Vec::new(), // Module compilation doesn't produce final object data until linking
+                    entry_symbol: None,
                 })
             }
             Err(e) => Err(CompilerError::AotError(e)),
@@ -154,6 +155,7 @@ impl FlowCompiler for AotCompilerWrapper {
                     dependencies,
                     target: CompilationTarget::Native,
                     data: object_bytes,
+                    entry_symbol: None,
                 })
             }
             Err(e) => Err(CompilerError::AotError(e)),

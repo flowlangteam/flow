@@ -1,0 +1,9 @@
+// Native printing example using C stdlib
+extern "C" {
+    func puts(*u8) -> i32;
+}
+
+func main() -> i64 {
+    puts("Hello from native Flow!\n");
+    0
+}

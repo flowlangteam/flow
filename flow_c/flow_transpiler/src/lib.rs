@@ -40,6 +40,7 @@ pub struct TranspileContext {
     pub functions: HashMap<String, FunctionSignature>,
     pub structs: HashMap<String, StructInfo>,
     pub current_function: Option<String>,
+    pub methods: HashMap<String, FunctionSignature>,
 }
 
 #[derive(Debug, Clone)]
@@ -62,6 +63,7 @@ impl TranspileContext {
             functions: HashMap::new(),
             structs: HashMap::new(),
             current_function: None,
+            methods: HashMap::new(),
         }
     }
 
@@ -89,6 +91,21 @@ impl TranspileContext {
                 .collect(),
         };
         self.structs.insert(struct_def.name.clone(), info);
+    }
+
+    pub fn add_method(&mut self, struct_name: &str, func: &Function) {
+        let sig = FunctionSignature {
+            name: func.name.clone(),
+            params: func
+                .params
+                .iter()
+                .map(|p| (p.name.clone(), p.ty.clone()))
+                .collect(),
+            return_type: func.return_type.clone(),
+            is_pub: func.is_pub,
+        };
+        let key = format!("{}::{}", struct_name, func.name);
+        self.methods.insert(key, sig);
     }
 }
 

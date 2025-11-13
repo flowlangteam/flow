@@ -83,21 +83,15 @@ impl ClassWriter {
     }
 
     pub fn add_method(&mut self, name: impl Into<String>) -> MethodBuilder {
-        MethodBuilder {
-            class: self,
-            name: name.into(),
-            descriptor: String::new(),
-            access_flags: 0,
-            code: None,
-            max_stack: 100,
-            max_locals: 100,
-        }
+        MethodBuilder::new(self, name.into())
     }
 
     pub fn add_default_constructor(&mut self) {
         let mut constructor = self.add_method("<init>");
         constructor.set_descriptor("()V");
         constructor.set_access_flags(ACC_PUBLIC);
+        constructor.set_max_stack(2);
+        constructor.set_max_locals(1);
 
         let mut code = CodeBuilder::new();
         code.add_instruction(Instruction::ALoad(0)); // Load 'this'
@@ -552,6 +546,9 @@ impl ClassWriter {
                     bytes.write_u8(NEW)?;
                     bytes.write_u16::<BigEndian>(index)?;
                 }
+                Instruction::Dup => {
+                    bytes.write_u8(DUP)?;
+                }
             }
         }
 
@@ -559,8 +556,8 @@ impl ClassWriter {
     }
 }
 
-pub struct MethodBuilder<'a> {
-    class: &'a mut ClassWriter,
+pub struct MethodBuilder<'class> {
+    class: &'class mut ClassWriter,
     name: String,
     descriptor: String,
     access_flags: u16,
@@ -569,7 +566,19 @@ pub struct MethodBuilder<'a> {
     max_locals: u16,
 }
 
-impl<'a> MethodBuilder<'a> {
+impl<'class> MethodBuilder<'class> {
+    pub fn new(class: &'class mut ClassWriter, name: String) -> Self {
+        Self {
+            class,
+            name,
+            descriptor: String::new(),
+            access_flags: 0,
+            code: None,
+            max_stack: 100,
+            max_locals: 100,
+        }
+    }
+
     pub fn set_descriptor(&mut self, descriptor: impl Into<String>) {
         self.descriptor = descriptor.into();
     }
@@ -591,7 +600,7 @@ impl<'a> MethodBuilder<'a> {
     }
 }
 
-impl<'a> Drop for MethodBuilder<'a> {
+impl<'class> Drop for MethodBuilder<'class> {
     fn drop(&mut self) {
         self.class.methods.push(MethodInfo {
             access_flags: self.access_flags,

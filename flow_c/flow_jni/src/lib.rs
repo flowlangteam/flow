@@ -5,8 +5,8 @@ use std::collections::HashMap;
 use std::ptr;
 use std::sync::Mutex;
 
-use flow_ast::Item;
-use flow_compiler::{CompilationTarget, FlowCompilerBuilder};
+use flow_ast::{Item, Program};
+use flow_compiler::{JitEngine, Result as CompilerResult};
 use flow_parser::Parser;
 
 // Global state for managing compiled modules
@@ -17,10 +17,35 @@ lazy_static::lazy_static! {
 
 struct CompiledModule {
     id: u64,
+    #[allow(dead_code)]
     name: String,
     compiler: Compiler,
     functions: Vec<String>,
 }
+
+struct Compiler {
+    engine: JitEngine,
+}
+
+impl Compiler {
+    fn new() -> Self {
+        Self {
+            engine: JitEngine::new(),
+        }
+    }
+
+    fn compile(&mut self, program: &Program) -> CompilerResult<()> {
+        self.engine.compile_module(program)
+    }
+
+    fn get_function(&mut self, name: &str) -> CompilerResult<Option<*const u8>> {
+        self.engine.get_function_pointer(name)
+    }
+}
+
+// The JIT engine stores raw pointers internally but access is serialized through MODULE_CACHE,
+// so sharing the wrapper across threads is safe in this context.
+unsafe impl Send for Compiler {}
 
 /// Initialize the Flow runtime
 #[no_mangle]
@@ -131,8 +156,8 @@ pub extern "system" fn Java_flow_bridge_FlowBridge_callNativeFunction(
     };
 
     // Find the module by ID
-    let cache = MODULE_CACHE.lock().unwrap();
-    let module = match cache.values().find(|m| m.id == module_id as u64) {
+    let mut cache = MODULE_CACHE.lock().unwrap();
+    let module = match cache.values_mut().find(|m| m.id == module_id as u64) {
         Some(m) => m,
         None => {
             let _ = env.throw_new(
@@ -154,11 +179,18 @@ pub extern "system" fn Java_flow_bridge_FlowBridge_callNativeFunction(
 
     // Get the compiled function pointer
     let func_ptr = match module.compiler.get_function(&func_name) {
-        Some(ptr) => ptr,
-        None => {
+        Ok(Some(ptr)) => ptr,
+        Ok(None) => {
             let _ = env.throw_new(
                 "java/lang/RuntimeException",
                 format!("Function not compiled: {}", func_name),
+            );
+            return 0.0;
+        }
+        Err(e) => {
+            let _ = env.throw_new(
+                "java/lang/RuntimeException",
+                format!("Failed to resolve function '{}': {:?}", func_name, e),
             );
             return 0.0;
         }

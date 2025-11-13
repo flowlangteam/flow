@@ -1,5 +1,0 @@
-// Test file with a parse error
-func main( -> i64 {
-    let x = 5;
-    x
-}

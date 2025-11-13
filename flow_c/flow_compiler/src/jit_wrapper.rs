@@ -121,6 +121,7 @@ impl FlowCompiler for JitCompilerWrapper {
                     dependencies,
                     target: CompilationTarget::Jit,
                     data: Vec::new(), // JIT doesn't produce binary data
+                    entry_symbol: None,
                 })
             }
             Err(e) => Err(e),

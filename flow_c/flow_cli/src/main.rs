@@ -10,6 +10,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
 
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 mod error_reporter;
 
 use error_reporter::{ErrorReporter, ErrorSpan, RichError, SpanStyle, Suggestion};
@@ -247,7 +250,6 @@ fn build_file(
     quiet: bool,
 ) -> Result<(), String> {
     let start_time = Instant::now();
-
     if !quiet {
         println!(
             "{} Building {}",
@@ -301,7 +303,7 @@ fn build_file(
 
     let config = CompilerConfig::new(CompilationTarget::Native);
 
-    let result = match compiler.compile_program(&program, &config) {
+    let compilation_output = match compiler.compile_program(&program, &config) {
         Ok(result) => {
             spinner.finish_and_clear();
             result
@@ -316,17 +318,37 @@ fn build_file(
         println!("  {} Compiled successfully", "✓".green().bold());
     }
 
-    // Extract object code
-    let object_code = match result {
+    let binary = match compilation_output {
+        flow_compiler::CompilerOutput::Module(module) => {
+            let modules = vec![module];
+            let link_result = compiler
+                .link_modules(&modules, &config)
+                .map_err(|e| format!("Linking failed: {}", e))?;
+
+            match link_result {
+                flow_compiler::CompilerOutput::Object(bytes) => bytes,
+                other => {
+                    return Err(format!(
+                        "Unexpected linker output: expected binary bytes, got {:?}",
+                        other
+                    ));
+                }
+            }
+        }
         flow_compiler::CompilerOutput::Object(bytes) => bytes,
-        _ => return Err("Expected object code from AOT compilation".to_string()),
+        other => {
+            return Err(format!(
+                "Unexpected compilation output for native build: {:?}",
+                other
+            ));
+        }
     };
 
     if !quiet {
         println!(
-            "  {} Generated object code ({} bytes)",
+            "  {} Linked executable ({} bytes)",
             "✓".green().bold(),
-            object_code.len()
+            binary.len()
         );
     }
 
@@ -339,13 +361,34 @@ fn build_file(
             .into()
     });
 
-    // Write object code to file (for now, since linking is not fully implemented)
     let spinner = create_spinner("Writing executable...", quiet);
-    fs::write(&output_name, &object_code).map_err(|e| {
+    fs::write(&output_name, &binary).map_err(|e| {
         spinner.finish_and_clear();
         format!("Failed to write output: {}", e)
     })?;
     spinner.finish_and_clear();
+
+    #[cfg(unix)]
+    {
+        // Ensure generated binaries are runnable on Unix-like hosts.
+        let mut perms = std::fs::metadata(&output_name)
+            .map_err(|e| {
+                format!(
+                    "Failed to read permissions for {}: {}",
+                    output_name.display(),
+                    e
+                )
+            })?
+            .permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&output_name, perms).map_err(|e| {
+            format!(
+                "Failed to set executable permissions on {}: {}",
+                output_name.display(),
+                e
+            )
+        })?;
+    }
 
     if !quiet {
         println!(
@@ -602,7 +645,7 @@ fn start_repl(show_ast: bool, _verbose: bool, quiet: bool) -> Result<(), String>
                 }
 
                 // Create a simple compiler for the REPL
-                let mut compiler = FlowCompilerBuilder::new()
+                let compiler = FlowCompilerBuilder::new()
                     .target(CompilationTarget::Jit)
                     .optimization_level(0)
                     .debug_info(false)
@@ -666,7 +709,7 @@ fn create_spinner(msg: &str, quiet: bool) -> ProgressBar {
 fn parse_error_to_rich(
     error: &flow_parser::ParseError,
     file_path: &str,
-    source: &str,
+    _source: &str,
 ) -> RichError {
     let mut suggestions = Vec::new();
 
@@ -704,6 +747,7 @@ fn parse_error_to_rich(
     }
 }
 
+#[allow(dead_code)]
 /// Convert analysis errors to rich errors with suggestions
 fn analysis_errors_to_rich(
     errors: &[flow_analyzer::AnalysisError],
@@ -768,6 +812,7 @@ fn analysis_errors_to_rich(
         .collect()
 }
 
+#[allow(dead_code)]
 /// Extract function name from error message
 fn extract_function_name(message: &str) -> Option<String> {
     if let Some(start) = message.find('\'') {

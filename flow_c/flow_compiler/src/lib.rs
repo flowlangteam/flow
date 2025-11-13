@@ -91,6 +91,7 @@ pub struct CompiledModule {
     pub dependencies: Vec<String>,
     pub target: CompilationTarget,
     pub data: Vec<u8>,
+    pub entry_symbol: Option<String>,
 }
 
 #[derive(Debug, Clone)]

@@ -7,8 +7,10 @@ use cranelift::prelude::*;
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
 use cranelift_jit::{JITBuilder, JITModule};
 use cranelift_module::{DataDescription, DataId, FuncId, Linkage, Module};
+use cranelift_object::{ObjectBuilder, ObjectModule};
 use flow_ast::*;
 use std::collections::{HashMap, HashSet};
+use std::mem;
 
 // External C functions for standard library
 extern "C" {
@@ -135,140 +137,58 @@ impl Environment {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct EngineSettings {
-    opt_level: settings::OptLevel,
-    enable_verifier: bool,
+struct CodegenState<'a, M: Module> {
+    module: &'a mut M,
+    builder_context: &'a mut FunctionBuilderContext,
+    ctx: &'a mut Context,
+    struct_layouts: &'a mut HashMap<String, StructLayout>,
+    struct_defs: &'a mut HashMap<String, Struct>,
+    string_data: &'a mut HashMap<String, DataId>,
+    string_counter: &'a mut usize,
+    function_ids: &'a mut HashMap<String, FuncId>,
+    function_sigs: &'a mut HashMap<String, (Vec<flow_ast::Type>, Option<flow_ast::Type>)>,
+    current_namespace: &'a mut Option<String>,
+    module_registry: &'a mut ModuleRegistry,
+    pointer_type: types::Type,
 }
 
-impl Default for EngineSettings {
-    fn default() -> Self {
+impl<'a, M: Module> CodegenState<'a, M> {
+    fn new(
+        module: &'a mut M,
+        builder_context: &'a mut FunctionBuilderContext,
+        ctx: &'a mut Context,
+        struct_layouts: &'a mut HashMap<String, StructLayout>,
+        struct_defs: &'a mut HashMap<String, Struct>,
+        string_data: &'a mut HashMap<String, DataId>,
+        string_counter: &'a mut usize,
+        function_ids: &'a mut HashMap<String, FuncId>,
+        function_sigs: &'a mut HashMap<String, (Vec<flow_ast::Type>, Option<flow_ast::Type>)>,
+        current_namespace: &'a mut Option<String>,
+        module_registry: &'a mut ModuleRegistry,
+    ) -> Self {
+        let pointer_type = module.target_config().pointer_type();
         Self {
-            opt_level: settings::OptLevel::None,
-            enable_verifier: false,
-        }
-    }
-}
-
-impl EngineSettings {
-    fn from_config(config: &CompilerConfig) -> Self {
-        let opt_level = match config.optimization_level {
-            0 => settings::OptLevel::None,
-            1 => settings::OptLevel::Speed,
-            2 => settings::OptLevel::Speed,
-            3 => settings::OptLevel::SpeedAndSize,
-            _ => settings::OptLevel::SpeedAndSize,
-        };
-
-        Self {
-            opt_level,
-            enable_verifier: config.debug_info,
-        }
-    }
-
-    fn apply_flags(&self, builder: &mut settings::Builder) -> Result<()> {
-        builder
-            .set("opt_level", Self::opt_level_flag(self.opt_level))
-            .map_err(|err| CompilerError::JitError(err.to_string()))?;
-        builder
-            .set(
-                "enable_verifier",
-                if self.enable_verifier {
-                    "true"
-                } else {
-                    "false"
-                },
-            )
-            .map_err(|err| CompilerError::JitError(err.to_string()))?;
-        Ok(())
-    }
-
-    fn opt_level_flag(level: settings::OptLevel) -> &'static str {
-        match level {
-            settings::OptLevel::None => "none",
-            settings::OptLevel::Speed => "speed",
-            settings::OptLevel::SpeedAndSize => "speed_and_size",
-        }
-    }
-}
-
-pub struct JitEngine {
-    builder_context: FunctionBuilderContext,
-    ctx: Context,
-    module: JITModule,
-    struct_layouts: HashMap<String, StructLayout>,
-    struct_defs: HashMap<String, Struct>,
-    string_data: HashMap<String, DataId>,
-    string_counter: usize,
-    function_ids: HashMap<String, FuncId>,
-    function_sigs: HashMap<String, (Vec<flow_ast::Type>, Option<flow_ast::Type>)>,
-    current_namespace: Option<String>,
-    module_registry: ModuleRegistry,
-    settings: EngineSettings,
-}
-
-impl JitEngine {
-    pub fn new() -> Self {
-        Self::new_with_settings(EngineSettings::default())
-            .expect("failed to create JIT engine with default settings")
-    }
-
-    fn new_with_settings(engine_settings: EngineSettings) -> Result<Self> {
-        let mut flag_builder = settings::builder();
-        engine_settings.apply_flags(&mut flag_builder)?;
-
-        let isa_builder = cranelift_native::builder().unwrap_or_else(|msg| {
-            panic!("host machine is not supported: {}", msg);
-        });
-        let flags = settings::Flags::new(flag_builder);
-        let isa = isa_builder
-            .finish(flags)
-            .map_err(|err| CompilerError::JitError(err.to_string()))?;
-
-        let mut builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
-
-        builder.symbol("putchar", putchar as *const u8);
-        builder.symbol("printf", printf as *const u8);
-        builder.symbol("malloc", malloc as *const u8);
-        builder.symbol("free", free as *const u8);
-        builder.symbol("memcpy", memcpy as *const u8);
-
-        let module = JITModule::new(builder);
-
-        let mut engine = Self {
-            builder_context: FunctionBuilderContext::new(),
-            ctx: module.make_context(),
             module,
-            struct_layouts: HashMap::new(),
-            struct_defs: HashMap::new(),
-            string_data: HashMap::new(),
-            string_counter: 0,
-            function_ids: HashMap::new(),
-            function_sigs: HashMap::new(),
-            current_namespace: None,
-            module_registry: ModuleRegistry::new(),
-            settings: engine_settings,
-        };
-
-        engine.register_runtime_intrinsics()?;
-        Ok(engine)
-    }
-
-    pub fn apply_compiler_config(&mut self, config: &CompilerConfig) -> Result<()> {
-        let desired = EngineSettings::from_config(config);
-        if desired == self.settings {
-            return Ok(());
+            builder_context,
+            ctx,
+            struct_layouts,
+            struct_defs,
+            string_data,
+            string_counter,
+            function_ids,
+            function_sigs,
+            current_namespace,
+            module_registry,
+            pointer_type,
         }
-
-        let module_registry = self.module_registry.clone();
-        let mut refreshed = Self::new_with_settings(desired)?;
-        refreshed.module_registry = module_registry;
-        *self = refreshed;
-        Ok(())
     }
 
     fn pointer_type(&self) -> types::Type {
-        self.module.target_config().pointer_type()
+        self.pointer_type
+    }
+
+    fn pointer_size(&self) -> usize {
+        self.pointer_type.bytes() as usize
     }
 
     fn register_runtime_intrinsics(&mut self) -> Result<()> {
@@ -295,21 +215,7 @@ impl JitEngine {
         Ok(())
     }
 
-    fn find_function_entry(&self, name: &str) -> Option<(String, FuncId)> {
-        if let Some(id) = self.function_ids.get(name) {
-            return Some((name.to_string(), *id));
-        }
-
-        let resolved = self.resolve_function_name(name);
-        if let Some(id) = self.function_ids.get(&resolved) {
-            return Some((resolved, *id));
-        }
-
-        None
-    }
-
-    /// Register an external function that can be called from JIT code
-    pub fn register_external_function(
+    fn register_external_function(
         &mut self,
         name: &str,
         params: Vec<flow_ast::Type>,
@@ -347,64 +253,94 @@ impl JitEngine {
         Ok(())
     }
 
-    /// Compile a complete program and return the main function pointer
-    pub fn compile(&mut self, program: &Program) -> Result<*const u8> {
-        if let Some(namespace_decl) = &program.namespace {
-            self.current_namespace = Some(namespace_decl.namespace.clone());
+    fn find_function_entry(&self, name: &str) -> Option<(String, FuncId)> {
+        if let Some(id) = self.function_ids.get(name) {
+            return Some((name.to_string(), *id));
         }
 
+        let resolved = self.resolve_function_name(name);
+        if let Some(id) = self.function_ids.get(&resolved) {
+            return Some((resolved, *id));
+        }
+
+        None
+    }
+
+    fn resolve_function_name(&self, name: &str) -> String {
+        if name.contains("::") {
+            name.to_string()
+        } else if let Some(namespace) = self.current_namespace.as_ref() {
+            format!("{}::{}", namespace, name)
+        } else {
+            name.to_string()
+        }
+    }
+
+    fn reset_struct_state(&mut self) {
         self.struct_defs.clear();
         self.struct_layouts.clear();
+    }
 
+    fn register_struct_definitions(&mut self, program: &Program) {
         for item in &program.items {
             if let Item::Struct(struct_def) = item {
                 self.struct_defs
                     .insert(struct_def.name.clone(), struct_def.clone());
             }
         }
+    }
 
+    fn compute_all_struct_layouts(&mut self, program: &Program) -> std::result::Result<(), String> {
         for item in &program.items {
             if let Item::Struct(struct_def) = item {
-                let layout = self
-                    .compute_struct_layout(struct_def)
-                    .map_err(|e| CompilerError::JitError(e))?;
+                let layout = self.compute_struct_layout(struct_def)?;
                 self.struct_layouts.insert(struct_def.name.clone(), layout);
             }
         }
+        Ok(())
+    }
 
+    fn declare_all_functions(&mut self, program: &Program) -> std::result::Result<(), String> {
         for item in &program.items {
             match item {
                 Item::Function(func) => {
-                    self.declare_function(func)
-                        .map_err(|e| CompilerError::JitError(e))?;
+                    self.declare_function(func)?;
                 }
                 Item::Impl(impl_block) => {
                     for method in &impl_block.methods {
-                        self.declare_function(method)
-                            .map_err(|e| CompilerError::JitError(e))?;
-                        self.register_method_aliases(&impl_block.struct_name, method)
-                            .map_err(|e| CompilerError::JitError(e))?;
+                        self.declare_function(method)?;
+                        self.register_method_aliases(&impl_block.struct_name, method)?;
+                    }
+                }
+                Item::ExternBlock(block) => {
+                    for extern_item in &block.items {
+                        self.register_external_function(
+                            &extern_item.name,
+                            extern_item.params.clone(),
+                            extern_item.return_type.clone(),
+                        )
+                        .map_err(|err| err.to_string())?;
                     }
                 }
                 Item::Use(_) => {}
                 _ => {}
             }
         }
+        Ok(())
+    }
 
+    fn compile_all_functions(&mut self, program: &Program) -> std::result::Result<(), String> {
         for item in &program.items {
             match item {
                 Item::Function(func) => {
-                    self.compile_function(func)
-                        .map_err(|e| CompilerError::JitError(e))?;
+                    self.compile_function(func)?;
                 }
                 Item::Impl(impl_block) => {
                     for method in &impl_block.methods {
-                        self.compile_function(method)
-                            .map_err(|e| CompilerError::JitError(e))?;
+                        self.compile_function(method)?;
                     }
                 }
-                Item::Struct(_) => {}
-                Item::ExternBlock(_) => {}
+                Item::Struct(_) | Item::ExternBlock(_) | Item::Use(_) => {}
                 Item::Import(import) => {
                     let module_name = import.path.join("::");
 
@@ -422,128 +358,60 @@ impl JitEngine {
                             .collect();
 
                         for (func_name, params, return_type) in functions_to_register {
-                            self.register_external_function(&func_name, params, return_type)?;
+                            self.register_external_function(&func_name, params, return_type)
+                                .map_err(|err| err.to_string())?;
                         }
                     } else {
-                        return Err(CompilerError::JitError(format!(
+                        return Err(format!(
                             "Module '{}' not found in module registry",
                             module_name
-                        )));
+                        ));
                     }
                 }
-                Item::Use(_) => {}
             }
         }
-
-        let main_symbol = self.resolve_function_name("main");
-        let main_id = self
-            .module
-            .get_name(&main_symbol)
-            .ok_or_else(|| CompilerError::JitError("No main function found".to_string()))?;
-
-        let main_func_id = match main_id {
-            cranelift_module::FuncOrDataId::Func(id) => id,
-            _ => {
-                return Err(CompilerError::JitError(
-                    "main is not a function".to_string(),
-                ))
-            }
-        };
-
-        self.module
-            .finalize_definitions()
-            .map_err(|e| CompilerError::JitError(e.to_string()))?;
-
-        let code_ptr = self.module.get_finalized_function(main_func_id);
-        Ok(code_ptr)
+        Ok(())
     }
 
-    /// Compile a module (library) without requiring a main function
-    pub fn compile_module(&mut self, program: &Program) -> Result<()> {
+    fn compile_program(&mut self, program: &Program) -> Result<String> {
         if let Some(namespace_decl) = &program.namespace {
-            self.current_namespace = Some(namespace_decl.namespace.clone());
+            *self.current_namespace = Some(namespace_decl.namespace.clone());
         }
 
-        for item in &program.items {
-            if let Item::Struct(struct_def) = item {
-                self.struct_defs
-                    .insert(struct_def.name.clone(), struct_def.clone());
-            }
+        self.reset_struct_state();
+        self.register_struct_definitions(program);
+        self.compute_all_struct_layouts(program)
+            .map_err(|e| CompilerError::JitError(e))?;
+        self.declare_all_functions(program)
+            .map_err(|e| CompilerError::JitError(e))?;
+        self.compile_all_functions(program)
+            .map_err(|e| CompilerError::JitError(e))?;
+
+        Ok(self.resolve_function_name("main"))
+    }
+
+    fn compile_module(&mut self, program: &Program) -> Result<()> {
+        if let Some(namespace_decl) = &program.namespace {
+            *self.current_namespace = Some(namespace_decl.namespace.clone());
         }
 
-        for item in &program.items {
-            if let Item::Struct(struct_def) = item {
-                let layout = self
-                    .compute_struct_layout(struct_def)
-                    .map_err(|e| CompilerError::JitError(e))?;
-                self.struct_layouts.insert(struct_def.name.clone(), layout);
-            }
-        }
+        self.reset_struct_state();
+        self.register_struct_definitions(program);
+        self.compute_all_struct_layouts(program)
+            .map_err(|e| CompilerError::JitError(e))?;
+        self.declare_all_functions(program)
+            .map_err(|e| CompilerError::JitError(e))?;
+        self.compile_all_functions(program)
+            .map_err(|e| CompilerError::JitError(e))?;
 
-        for item in &program.items {
-            match item {
-                Item::Function(func) => {
-                    self.declare_function(func)
-                        .map_err(|e| CompilerError::JitError(e))?;
-                }
-                Item::Impl(impl_block) => {
-                    for method in &impl_block.methods {
-                        self.declare_function(method)
-                            .map_err(|e| CompilerError::JitError(e))?;
-                        self.register_method_aliases(&impl_block.struct_name, method)
-                            .map_err(|e| CompilerError::JitError(e))?;
-                    }
-                }
-                Item::Use(_) => {}
-                _ => {}
-            }
-        }
-
-        for item in &program.items {
-            match item {
-                Item::Function(func) => {
-                    self.compile_function(func)
-                        .map_err(|e| CompilerError::JitError(e))?;
-                }
-                Item::Impl(impl_block) => {
-                    for method in &impl_block.methods {
-                        self.compile_function(method)
-                            .map_err(|e| CompilerError::JitError(e))?;
-                    }
-                }
-                Item::Struct(_) => {}
-                Item::ExternBlock(_) => {}
-                Item::Import(_) => {}
-                Item::Use(_) => {}
-            }
-        }
-
-        if let Some(namespace) = &self.current_namespace {
+        if let Some(namespace) = self.current_namespace.clone() {
             let external_module = self
-                .extract_module_metadata(namespace, program)
+                .extract_module_metadata(&namespace, program)
                 .map_err(|e| CompilerError::JitError(e))?;
             self.module_registry.register_module(external_module);
         }
 
         Ok(())
-    }
-
-    pub fn get_module_registry(&self) -> &ModuleRegistry {
-        &self.module_registry
-    }
-
-    pub fn get_module_registry_mut(&mut self) -> &mut ModuleRegistry {
-        &mut self.module_registry
-    }
-
-    pub fn struct_layout_info(&self, name: &str) -> Option<(usize, usize)> {
-        self.struct_layouts
-            .get(name)
-            .map(|layout| (layout.total_size, layout.alignment))
-    }
-
-    pub fn pointer_size(&self) -> usize {
-        self.pointer_type().bytes() as usize
     }
 
     fn extract_module_metadata(
@@ -589,59 +457,6 @@ impl JitEngine {
         })
     }
 
-    fn resolve_function_name(&self, name: &str) -> String {
-        if name.contains("::") {
-            name.to_string()
-        } else if let Some(namespace) = &self.current_namespace {
-            format!("{}::{}", namespace, name)
-        } else {
-            name.to_string()
-        }
-    }
-}
-
-// Helper function to convert Flow types to Cranelift types
-fn type_to_cranelift(
-    ty: &flow_ast::Type,
-    pointer_type: types::Type,
-    struct_layouts: Option<&HashMap<String, StructLayout>>,
-) -> std::result::Result<types::Type, String> {
-    match ty {
-        flow_ast::Type::I8 => Ok(types::I8),
-        flow_ast::Type::I16 => Ok(types::I16),
-        flow_ast::Type::I32 => Ok(types::I32),
-        flow_ast::Type::I64 => Ok(types::I64),
-        flow_ast::Type::I128 => Err("I128 not supported in Cranelift".to_string()),
-        flow_ast::Type::U8 => Ok(types::I8), // Cranelift treats unsigned as signed
-        flow_ast::Type::U16 => Ok(types::I16),
-        flow_ast::Type::U32 => Ok(types::I32),
-        flow_ast::Type::U64 => Ok(types::I64),
-        flow_ast::Type::U128 => Err("U128 not supported in Cranelift".to_string()),
-        flow_ast::Type::F32 => Ok(types::F32),
-        flow_ast::Type::F64 => Ok(types::F64),
-        flow_ast::Type::Bool => Ok(types::I8),
-        flow_ast::Type::Char => Ok(types::I32), // Unicode char is 32-bit
-        flow_ast::Type::String => Ok(pointer_type),
-        flow_ast::Type::Unit => Err("Unit type cannot be used as parameter".to_string()),
-        flow_ast::Type::Named(name) => {
-            if let Some(layouts) = struct_layouts {
-                if !layouts.contains_key(name) {
-                    return Err(format!("Struct type '{}' has no computed layout", name));
-                }
-            }
-            Ok(pointer_type)
-        }
-        flow_ast::Type::Function(_, _) => Ok(pointer_type),
-        flow_ast::Type::Pointer(_) => Ok(pointer_type),
-        flow_ast::Type::MutPointer(_) => Ok(pointer_type),
-        flow_ast::Type::Array(_, _) => Ok(pointer_type),
-        flow_ast::Type::Slice(_) => Ok(pointer_type),
-        flow_ast::Type::TypeVar(_) => Err("Type variables not yet implemented".to_string()),
-    }
-}
-
-// Placeholder implementations for the missing methods that I'll need to implement
-impl JitEngine {
     fn compute_struct_layout(
         &mut self,
         struct_def: &Struct,
@@ -713,7 +528,7 @@ impl JitEngine {
     ) -> std::result::Result<(usize, usize), String> {
         use flow_ast::Type;
 
-        let pointer_size = self.pointer_type().bytes() as usize;
+        let pointer_size = self.pointer_size();
 
         match ty {
             Type::I8 | Type::U8 | Type::Bool => Ok((1, 1)),
@@ -751,21 +566,18 @@ impl JitEngine {
     fn declare_function(&mut self, func: &Function) -> std::result::Result<(), String> {
         let pointer_type = self.pointer_type();
 
-        // Create function signature
         let mut sig = self.module.make_signature();
 
-        // Add parameters
         let mut param_types = Vec::new();
         for param in &func.params {
-            let param_type = type_to_cranelift(&param.ty, pointer_type, Some(&self.struct_layouts))
+            let param_type = type_to_cranelift(&param.ty, pointer_type, Some(self.struct_layouts))
                 .map_err(|e| format!("Failed to convert parameter type: {}", e))?;
             sig.params.push(AbiParam::new(param_type));
             param_types.push(param.ty.clone());
         }
 
-        // Add return type
         let return_type = if let Some(return_type) = &func.return_type {
-            let ret_type = type_to_cranelift(return_type, pointer_type, Some(&self.struct_layouts))
+            let ret_type = type_to_cranelift(return_type, pointer_type, Some(self.struct_layouts))
                 .map_err(|e| format!("Failed to convert return type: {}", e))?;
             sig.returns.push(AbiParam::new(ret_type));
             Some(return_type.clone())
@@ -775,7 +587,6 @@ impl JitEngine {
 
         let symbol_name = self.resolve_function_name(&func.name);
 
-        // Create function ID and register it
         let func_id = self
             .module
             .declare_function(&symbol_name, Linkage::Export, &sig)
@@ -812,7 +623,7 @@ impl JitEngine {
         self.function_ids.insert(alias.clone(), func_id);
         self.function_sigs.insert(alias.clone(), signature.clone());
 
-        if let Some(namespace) = &self.current_namespace {
+        if let Some(namespace) = self.current_namespace.as_ref() {
             let namespaced_alias = format!("{}::{}", namespace, alias);
             self.function_ids.insert(namespaced_alias.clone(), func_id);
             self.function_sigs.insert(namespaced_alias, signature);
@@ -826,7 +637,6 @@ impl JitEngine {
             .find_function_entry(&func.name)
             .ok_or_else(|| format!("Function {} not declared", func.name))?;
 
-        // Get function signature
         let (param_types, return_type) = self
             .function_sigs
             .get(&lookup_key)
@@ -835,45 +645,39 @@ impl JitEngine {
 
         let pointer_type = self.pointer_type();
 
-        // Create cranelift signature
         let mut sig = self.module.make_signature();
         for param_type in &param_types {
             let cranelift_type =
-                type_to_cranelift(param_type, pointer_type, Some(&self.struct_layouts))
+                type_to_cranelift(param_type, pointer_type, Some(self.struct_layouts))
                     .map_err(|e| format!("Failed to convert parameter type: {}", e))?;
             sig.params.push(AbiParam::new(cranelift_type));
         }
         if let Some(ret_type) = &return_type {
             let cranelift_ret_type =
-                type_to_cranelift(ret_type, pointer_type, Some(&self.struct_layouts))
+                type_to_cranelift(ret_type, pointer_type, Some(self.struct_layouts))
                     .map_err(|e| format!("Failed to convert return type: {}", e))?;
             sig.returns.push(AbiParam::new(cranelift_ret_type));
         }
 
-        // Clear the context for this function
         self.ctx.clear();
         self.ctx.func = cranelift::codegen::ir::Function::with_name_signature(
-            cranelift::codegen::ir::UserFuncName::user(0, 0), // placeholder name
+            cranelift::codegen::ir::UserFuncName::user(0, 0),
             sig,
         );
 
-        // Create function builder
-        let mut builder = FunctionBuilder::new(&mut self.ctx.func, &mut self.builder_context);
+        let mut builder = FunctionBuilder::new(&mut self.ctx.func, self.builder_context);
 
-        // Create entry block
         let entry_block = builder.create_block();
 
-        // Add parameters to the entry block
         for param_type in &param_types {
             let cranelift_type =
-                type_to_cranelift(param_type, pointer_type, Some(&self.struct_layouts))
+                type_to_cranelift(param_type, pointer_type, Some(self.struct_layouts))
                     .map_err(|e| format!("Failed to convert parameter type: {}", e))?;
             builder.append_block_param(entry_block, cranelift_type);
         }
 
         builder.switch_to_block(entry_block);
 
-        // Add function parameters as variables
         let params = builder.block_params(entry_block).to_vec();
         let mut variables = Environment::new();
         for (i, param) in func.params.iter().enumerate() {
@@ -893,17 +697,16 @@ impl JitEngine {
 
         builder.seal_block(entry_block);
 
-        // Compile the function body
         let result_value = {
             let mut expr_ctx = ExpressionContext {
-                module: &mut self.module,
-                string_data: &mut self.string_data,
-                string_counter: &mut self.string_counter,
-                function_ids: &self.function_ids,
-                function_sigs: &self.function_sigs,
+                module: self.module,
+                string_data: self.string_data,
+                string_counter: self.string_counter,
+                function_ids: self.function_ids,
+                function_sigs: self.function_sigs,
                 namespace: self.current_namespace.as_deref(),
                 pointer_type,
-                struct_layouts: &self.struct_layouts,
+                struct_layouts: self.struct_layouts,
             };
 
             compile_expression(
@@ -915,7 +718,6 @@ impl JitEngine {
             )?
         };
 
-        // Return the result
         if return_type.is_some() {
             builder.ins().return_(&[result_value]);
         } else {
@@ -924,17 +726,484 @@ impl JitEngine {
 
         builder.finalize();
 
-        // Define the function
         self.module
-            .define_function(func_id, &mut self.ctx)
+            .define_function(func_id, self.ctx)
             .map_err(|e| format!("Failed to define function: {}", e))?;
 
         Ok(())
     }
 }
 
-struct ExpressionContext<'a, 'b> {
-    module: &'a mut JITModule,
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct EngineSettings {
+    opt_level: settings::OptLevel,
+    enable_verifier: bool,
+    is_pic: bool,
+}
+
+impl Default for EngineSettings {
+    fn default() -> Self {
+        Self {
+            opt_level: settings::OptLevel::None,
+            enable_verifier: false,
+            is_pic: cfg!(target_os = "macos"),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ObjectCompileOutput {
+    pub object_bytes: Vec<u8>,
+    pub struct_layouts: HashMap<String, (usize, usize)>,
+    pub namespace: Option<String>,
+    pub entry_symbol: Option<String>,
+}
+
+pub struct ObjectEngine {
+    builder_context: FunctionBuilderContext,
+    ctx: Context,
+    module: ObjectModule,
+    struct_layouts: HashMap<String, StructLayout>,
+    struct_defs: HashMap<String, Struct>,
+    string_data: HashMap<String, DataId>,
+    string_counter: usize,
+    function_ids: HashMap<String, FuncId>,
+    function_sigs: HashMap<String, (Vec<flow_ast::Type>, Option<flow_ast::Type>)>,
+    current_namespace: Option<String>,
+    module_registry: ModuleRegistry,
+    settings: EngineSettings,
+}
+
+impl ObjectEngine {
+    pub fn new() -> Self {
+        Self::new_with_settings(EngineSettings::default())
+            .expect("failed to create object engine with default settings")
+    }
+
+    fn new_with_settings(engine_settings: EngineSettings) -> Result<Self> {
+        let module = Self::create_module(&engine_settings)?;
+
+        let mut engine = Self {
+            builder_context: FunctionBuilderContext::new(),
+            ctx: module.make_context(),
+            module,
+            struct_layouts: HashMap::new(),
+            struct_defs: HashMap::new(),
+            string_data: HashMap::new(),
+            string_counter: 0,
+            function_ids: HashMap::new(),
+            function_sigs: HashMap::new(),
+            current_namespace: None,
+            module_registry: ModuleRegistry::new(),
+            settings: engine_settings,
+        };
+
+        engine.reset_state()?;
+        Ok(engine)
+    }
+
+    fn map_error(err: CompilerError) -> CompilerError {
+        match err {
+            CompilerError::JitError(msg) => CompilerError::AotError(msg),
+            other => other,
+        }
+    }
+
+    fn create_module(settings: &EngineSettings) -> Result<ObjectModule> {
+        let mut flag_builder = settings::builder();
+        settings
+            .apply_flags(&mut flag_builder)
+            .map_err(Self::map_error)?;
+
+        let isa_builder = cranelift_native::builder().unwrap_or_else(|msg| {
+            panic!("host machine is not supported: {}", msg);
+        });
+        let flags = settings::Flags::new(flag_builder);
+        let isa = isa_builder
+            .finish(flags)
+            .map_err(|err| CompilerError::AotError(err.to_string()))?;
+
+        let builder = ObjectBuilder::new(
+            isa,
+            "flow_object".to_string(),
+            cranelift_module::default_libcall_names(),
+        )
+        .map_err(|err| CompilerError::AotError(err.to_string()))?;
+
+        Ok(ObjectModule::new(builder))
+    }
+
+    fn with_state<R>(&mut self, f: impl FnOnce(&mut CodegenState<'_, ObjectModule>) -> R) -> R {
+        let mut state = CodegenState::new(
+            &mut self.module,
+            &mut self.builder_context,
+            &mut self.ctx,
+            &mut self.struct_layouts,
+            &mut self.struct_defs,
+            &mut self.string_data,
+            &mut self.string_counter,
+            &mut self.function_ids,
+            &mut self.function_sigs,
+            &mut self.current_namespace,
+            &mut self.module_registry,
+        );
+        f(&mut state)
+    }
+
+    fn reset_state(&mut self) -> Result<()> {
+        self.ctx = self.module.make_context();
+        self.builder_context = FunctionBuilderContext::new();
+        self.struct_layouts.clear();
+        self.struct_defs.clear();
+        self.string_data.clear();
+        self.string_counter = 0;
+        self.function_ids.clear();
+        self.function_sigs.clear();
+        self.current_namespace = None;
+
+        self.with_state(|state| state.register_runtime_intrinsics())
+            .map_err(Self::map_error)?;
+        Ok(())
+    }
+
+    pub fn apply_compiler_config(&mut self, config: &CompilerConfig) -> Result<()> {
+        let desired = EngineSettings::from_config(config);
+        if desired == self.settings {
+            return Ok(());
+        }
+
+        let module_registry = self.module_registry.clone();
+        let mut refreshed = Self::new_with_settings(desired)?;
+        refreshed.module_registry = module_registry;
+        *self = refreshed;
+        Ok(())
+    }
+
+    pub fn compile_program(&mut self, program: &Program) -> Result<ObjectCompileOutput> {
+        let entry_symbol = self
+            .with_state(|state| state.compile_program(program))
+            .map_err(Self::map_error)?;
+        self.finalize_object(Some(entry_symbol))
+    }
+
+    pub fn compile_module(&mut self, program: &Program) -> Result<ObjectCompileOutput> {
+        self.with_state(|state| state.compile_module(program))
+            .map_err(Self::map_error)?;
+        self.finalize_object(None)
+    }
+
+    pub fn get_module_registry(&self) -> &ModuleRegistry {
+        &self.module_registry
+    }
+
+    pub fn pointer_size(&self) -> usize {
+        self.module.target_config().pointer_type().bytes() as usize
+    }
+
+    fn finalize_object(&mut self, entry_symbol: Option<String>) -> Result<ObjectCompileOutput> {
+        let namespace = self.current_namespace.clone();
+        let raw_layouts = mem::take(&mut self.struct_layouts);
+        let struct_layouts = raw_layouts
+            .into_iter()
+            .map(|(name, layout)| (name, (layout.total_size, layout.alignment)))
+            .collect();
+
+        let new_module = Self::create_module(&self.settings)?;
+        let finished_module = mem::replace(&mut self.module, new_module);
+        let product = finished_module.finish();
+        let object_bytes = product
+            .emit()
+            .map_err(|err| CompilerError::AotError(err.to_string()))?;
+
+        self.reset_state()?;
+
+        Ok(ObjectCompileOutput {
+            object_bytes,
+            struct_layouts,
+            namespace,
+            entry_symbol,
+        })
+    }
+}
+
+impl EngineSettings {
+    fn from_config(config: &CompilerConfig) -> Self {
+        let opt_level = match config.optimization_level {
+            0 => settings::OptLevel::None,
+            1 => settings::OptLevel::Speed,
+            2 => settings::OptLevel::Speed,
+            3 => settings::OptLevel::SpeedAndSize,
+            _ => settings::OptLevel::SpeedAndSize,
+        };
+
+        let mut settings = Self {
+            opt_level,
+            enable_verifier: config.debug_info,
+            is_pic: cfg!(target_os = "macos"),
+        };
+
+        if let Some(pic_flag) = config.flags.get("pic") {
+            let normalized = pic_flag.trim().to_ascii_lowercase();
+            settings.is_pic = matches!(normalized.as_str(), "1" | "true" | "yes" | "on");
+        } else if config.target == crate::CompilationTarget::Native && cfg!(target_os = "macos") {
+            settings.is_pic = true;
+        }
+
+        settings
+    }
+
+    fn apply_flags(&self, builder: &mut settings::Builder) -> Result<()> {
+        builder
+            .set("opt_level", Self::opt_level_flag(self.opt_level))
+            .map_err(|err| CompilerError::JitError(err.to_string()))?;
+        builder
+            .set(
+                "enable_verifier",
+                if self.enable_verifier {
+                    "true"
+                } else {
+                    "false"
+                },
+            )
+            .map_err(|err| CompilerError::JitError(err.to_string()))?;
+        builder
+            .set("is_pic", if self.is_pic { "true" } else { "false" })
+            .map_err(|err| CompilerError::JitError(err.to_string()))?;
+        Ok(())
+    }
+
+    fn opt_level_flag(level: settings::OptLevel) -> &'static str {
+        match level {
+            settings::OptLevel::None => "none",
+            settings::OptLevel::Speed => "speed",
+            settings::OptLevel::SpeedAndSize => "speed_and_size",
+        }
+    }
+}
+
+pub struct JitEngine {
+    builder_context: FunctionBuilderContext,
+    ctx: Context,
+    module: JITModule,
+    struct_layouts: HashMap<String, StructLayout>,
+    struct_defs: HashMap<String, Struct>,
+    string_data: HashMap<String, DataId>,
+    string_counter: usize,
+    function_ids: HashMap<String, FuncId>,
+    function_sigs: HashMap<String, (Vec<flow_ast::Type>, Option<flow_ast::Type>)>,
+    current_namespace: Option<String>,
+    module_registry: ModuleRegistry,
+    settings: EngineSettings,
+}
+
+impl JitEngine {
+    pub fn new() -> Self {
+        Self::new_with_settings(EngineSettings::default())
+            .expect("failed to create JIT engine with default settings")
+    }
+
+    fn new_with_settings(engine_settings: EngineSettings) -> Result<Self> {
+        let mut flag_builder = settings::builder();
+        engine_settings.apply_flags(&mut flag_builder)?;
+
+        let isa_builder = cranelift_native::builder().unwrap_or_else(|msg| {
+            panic!("host machine is not supported: {}", msg);
+        });
+        let flags = settings::Flags::new(flag_builder);
+        let isa = isa_builder
+            .finish(flags)
+            .map_err(|err| CompilerError::JitError(err.to_string()))?;
+
+        let mut builder = JITBuilder::with_isa(isa, cranelift_module::default_libcall_names());
+
+        builder.symbol("putchar", putchar as *const u8);
+        builder.symbol("printf", printf as *const u8);
+        builder.symbol("malloc", malloc as *const u8);
+        builder.symbol("free", free as *const u8);
+        builder.symbol("memcpy", memcpy as *const u8);
+
+        let module = JITModule::new(builder);
+
+        let mut engine = Self {
+            builder_context: FunctionBuilderContext::new(),
+            ctx: module.make_context(),
+            module,
+            struct_layouts: HashMap::new(),
+            struct_defs: HashMap::new(),
+            string_data: HashMap::new(),
+            string_counter: 0,
+            function_ids: HashMap::new(),
+            function_sigs: HashMap::new(),
+            current_namespace: None,
+            module_registry: ModuleRegistry::new(),
+            settings: engine_settings,
+        };
+
+        engine.with_state(|state| state.register_runtime_intrinsics())?;
+        Ok(engine)
+    }
+
+    pub fn apply_compiler_config(&mut self, config: &CompilerConfig) -> Result<()> {
+        let desired = EngineSettings::from_config(config);
+        if desired == self.settings {
+            return Ok(());
+        }
+
+        let module_registry = self.module_registry.clone();
+        let mut refreshed = Self::new_with_settings(desired)?;
+        refreshed.module_registry = module_registry;
+        *self = refreshed;
+        Ok(())
+    }
+
+    fn with_state<R>(&mut self, f: impl FnOnce(&mut CodegenState<'_, JITModule>) -> R) -> R {
+        let mut state = CodegenState::new(
+            &mut self.module,
+            &mut self.builder_context,
+            &mut self.ctx,
+            &mut self.struct_layouts,
+            &mut self.struct_defs,
+            &mut self.string_data,
+            &mut self.string_counter,
+            &mut self.function_ids,
+            &mut self.function_sigs,
+            &mut self.current_namespace,
+            &mut self.module_registry,
+        );
+        f(&mut state)
+    }
+
+    fn pointer_type(&self) -> types::Type {
+        self.module.target_config().pointer_type()
+    }
+
+    /// Register an external function that can be called from JIT code
+    pub fn register_external_function(
+        &mut self,
+        name: &str,
+        params: Vec<flow_ast::Type>,
+        return_type: Option<flow_ast::Type>,
+    ) -> Result<()> {
+        self.with_state(|state| state.register_external_function(name, params, return_type))
+    }
+
+    /// Compile a complete program and return the main function pointer
+    pub fn compile(&mut self, program: &Program) -> Result<*const u8> {
+        let main_symbol = self.with_state(|state| state.compile_program(program))?;
+        let main_id = self
+            .module
+            .get_name(&main_symbol)
+            .ok_or_else(|| CompilerError::JitError("No main function found".to_string()))?;
+
+        let main_func_id = match main_id {
+            cranelift_module::FuncOrDataId::Func(id) => id,
+            _ => {
+                return Err(CompilerError::JitError(
+                    "main is not a function".to_string(),
+                ))
+            }
+        };
+
+        self.module
+            .finalize_definitions()
+            .map_err(|e| CompilerError::JitError(e.to_string()))?;
+
+        let code_ptr = self.module.get_finalized_function(main_func_id);
+        Ok(code_ptr)
+    }
+
+    /// Compile a module (library) without requiring a main function
+    pub fn compile_module(&mut self, program: &Program) -> Result<()> {
+        self.with_state(|state| state.compile_module(program))
+    }
+
+    pub fn get_module_registry(&self) -> &ModuleRegistry {
+        &self.module_registry
+    }
+
+    pub fn get_module_registry_mut(&mut self) -> &mut ModuleRegistry {
+        &mut self.module_registry
+    }
+
+    /// Finalize any pending function definitions and return the function pointer for the
+    /// requested symbol if it exists.
+    pub fn get_function_pointer(&mut self, name: &str) -> Result<Option<*const u8>> {
+        self.module
+            .finalize_definitions()
+            .map_err(|e| CompilerError::JitError(e.to_string()))?;
+
+        let mut candidates = Vec::new();
+        candidates.push(name.to_string());
+
+        if !name.contains("::") {
+            if let Some(namespace) = &self.current_namespace {
+                candidates.push(format!("{}::{}", namespace, name));
+            }
+        }
+
+        for candidate in candidates {
+            if let Some(func_id) = self.function_ids.get(&candidate) {
+                let ptr = self.module.get_finalized_function(*func_id);
+                return Ok(Some(ptr));
+            }
+        }
+
+        Ok(None)
+    }
+
+    pub fn struct_layout_info(&self, name: &str) -> Option<(usize, usize)> {
+        self.struct_layouts
+            .get(name)
+            .map(|layout| (layout.total_size, layout.alignment))
+    }
+
+    pub fn pointer_size(&self) -> usize {
+        self.pointer_type().bytes() as usize
+    }
+}
+
+// Helper function to convert Flow types to Cranelift types
+fn type_to_cranelift(
+    ty: &flow_ast::Type,
+    pointer_type: types::Type,
+    struct_layouts: Option<&HashMap<String, StructLayout>>,
+) -> std::result::Result<types::Type, String> {
+    match ty {
+        flow_ast::Type::I8 => Ok(types::I8),
+        flow_ast::Type::I16 => Ok(types::I16),
+        flow_ast::Type::I32 => Ok(types::I32),
+        flow_ast::Type::I64 => Ok(types::I64),
+        flow_ast::Type::I128 => Err("I128 not supported in Cranelift".to_string()),
+        flow_ast::Type::U8 => Ok(types::I8), // Cranelift treats unsigned as signed
+        flow_ast::Type::U16 => Ok(types::I16),
+        flow_ast::Type::U32 => Ok(types::I32),
+        flow_ast::Type::U64 => Ok(types::I64),
+        flow_ast::Type::U128 => Err("U128 not supported in Cranelift".to_string()),
+        flow_ast::Type::F32 => Ok(types::F32),
+        flow_ast::Type::F64 => Ok(types::F64),
+        flow_ast::Type::Bool => Ok(types::I8),
+        flow_ast::Type::Char => Ok(types::I32), // Unicode char is 32-bit
+        flow_ast::Type::String => Ok(pointer_type),
+        flow_ast::Type::Unit => Err("Unit type cannot be used as parameter".to_string()),
+        flow_ast::Type::Named(name) => {
+            if let Some(layouts) = struct_layouts {
+                if !layouts.contains_key(name) {
+                    return Err(format!("Struct type '{}' has no computed layout", name));
+                }
+            }
+            Ok(pointer_type)
+        }
+        flow_ast::Type::Function(_, _) => Ok(pointer_type),
+        flow_ast::Type::Pointer(_) => Ok(pointer_type),
+        flow_ast::Type::MutPointer(_) => Ok(pointer_type),
+        flow_ast::Type::Array(_, _) => Ok(pointer_type),
+        flow_ast::Type::Slice(_) => Ok(pointer_type),
+        flow_ast::Type::TypeVar(_) => Err("Type variables not yet implemented".to_string()),
+    }
+}
+
+struct ExpressionContext<'a, 'b, M: Module> {
+    module: &'a mut M,
     string_data: &'a mut HashMap<String, DataId>,
     string_counter: &'a mut usize,
     function_ids: &'b HashMap<String, FuncId>,
@@ -944,7 +1213,7 @@ struct ExpressionContext<'a, 'b> {
     struct_layouts: &'b HashMap<String, StructLayout>,
 }
 
-impl<'a, 'b> ExpressionContext<'a, 'b> {
+impl<'a, 'b, M: Module> ExpressionContext<'a, 'b, M> {
     fn pointer_type(&self) -> types::Type {
         self.pointer_type
     }
@@ -1018,7 +1287,7 @@ fn align_to(value: usize, alignment: usize) -> usize {
 fn infer_flow_type(
     expr: &Expr,
     variables: &Environment,
-    context: &ExpressionContext,
+    context: &ExpressionContext<'_, '_, impl Module>,
 ) -> Option<flow_ast::Type> {
     if let Some(struct_name) = resolve_struct_name(expr, variables, context) {
         return Some(flow_ast::Type::Named(struct_name));
@@ -1033,7 +1302,7 @@ fn infer_flow_type(
 fn resolve_struct_name(
     expr: &Expr,
     variables: &Environment,
-    context: &ExpressionContext,
+    context: &ExpressionContext<'_, '_, impl Module>,
 ) -> Option<String> {
     match expr {
         Expr::Ident(name) => variables.get(name).and_then(|binding| {
@@ -1090,7 +1359,7 @@ fn compile_expression(
     expr: &Expr,
     builder: &mut FunctionBuilder,
     variables: &mut Environment,
-    context: &mut ExpressionContext,
+    context: &mut ExpressionContext<'_, '_, impl Module>,
     expected_type: Option<&flow_ast::Type>,
 ) -> std::result::Result<cranelift::prelude::Value, String> {
     let pointer_type = context.pointer_type();
@@ -1666,7 +1935,7 @@ mod tests {
         };
 
         let layout = engine
-            .compute_struct_layout(&struct_def)
+            .with_state(|state| state.compute_struct_layout(&struct_def))
             .expect("struct layout computation should succeed");
 
         assert_eq!(layout.fields.len(), 2);
@@ -1704,11 +1973,11 @@ mod tests {
         engine.struct_defs.insert(outer.name.clone(), outer.clone());
 
         engine
-            .compute_struct_layout(&inner)
+            .with_state(|state| state.compute_struct_layout(&inner))
             .expect("inner layout should succeed");
 
         let outer_layout = engine
-            .compute_struct_layout(&outer)
+            .with_state(|state| state.compute_struct_layout(&outer))
             .expect("outer layout should succeed");
 
         let pointer_size = engine.pointer_type().bytes() as usize;

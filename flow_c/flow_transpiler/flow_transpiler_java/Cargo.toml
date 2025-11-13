@@ -21,6 +21,7 @@ flow_transpiler = { path = ".." }
 anyhow = "1.0"
 thiserror = "1.0"
 byteorder = "1.5"
+zip = { version = "0.6", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 flow_parser = { path = "../../flow_parser" }

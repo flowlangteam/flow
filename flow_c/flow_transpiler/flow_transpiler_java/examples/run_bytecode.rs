@@ -2,7 +2,41 @@ use flow_ast::*;
 use flow_transpiler::Transpiler;
 use flow_transpiler_java::JavaTranspiler;
 use std::fs;
+use std::io::{self, Cursor};
+use std::path::Path;
 use std::process::Command;
+
+use zip::ZipArchive;
+
+fn dummy_span() -> Span {
+    Span::new(0, 0)
+}
+
+fn write_classes_from_jar(bytes: &[u8]) -> io::Result<Vec<String>> {
+    let cursor = Cursor::new(bytes);
+    let mut archive = ZipArchive::new(cursor)?;
+    let mut written = Vec::new();
+
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i)?;
+        if file.name().ends_with('/') {
+            continue;
+        }
+
+        let path = Path::new(file.name());
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                fs::create_dir_all(parent)?;
+            }
+        }
+
+        let mut out_file = fs::File::create(path)?;
+        io::copy(&mut file, &mut out_file)?;
+        written.push(file.name().to_string());
+    }
+
+    Ok(written)
+}
 
 fn main() {
     println!("=== Flow to Java Bytecode Transpiler Demo ===\n");
@@ -10,6 +44,7 @@ fn main() {
     // Test 1: Simple calculation
     println!("1. Compiling and running simple calculation...");
     let program = Program {
+        namespace: None,
         items: vec![Item::Function(Function {
             name: "calculate".to_string(),
             params: vec![],
@@ -24,12 +59,14 @@ fn main() {
                 right: Box::new(Expr::Integer(7)),
             },
             is_pub: true,
+            span: dummy_span(),
         })],
     };
 
     let mut transpiler = JavaTranspiler::new("Calculator");
-    let bytecode = transpiler.transpile(&program).expect("Failed to transpile");
-    fs::write("Calculator.class", &bytecode).expect("Failed to write class file");
+    let jar_bytes = transpiler.transpile(&program).expect("Failed to transpile");
+    fs::write("Calculator.jar", &jar_bytes).expect("Failed to write jar file");
+    write_classes_from_jar(&jar_bytes).expect("Failed to extract Calculator classes");
 
     // Create a Java wrapper to call the method
     let wrapper = r#"
@@ -45,7 +82,7 @@ public class RunCalculator {
     fs::write("RunCalculator.java", wrapper).expect("Failed to write wrapper");
 
     // Compile and run
-    let compile = Command::new("javac").args(&["RunCalculator.java"]).output();
+    let compile = Command::new("javac").args(["RunCalculator.java"]).output();
 
     if let Ok(output) = compile {
         if output.status.success() {
@@ -76,6 +113,7 @@ public class RunCalculator {
     // Test 2: Fibonacci-like calculation with pipe
     println!("\n2. Compiling and running pipe operator...");
     let program = Program {
+        namespace: None,
         items: vec![
             Item::Function(Function {
                 name: "triple".to_string(),
@@ -90,6 +128,7 @@ public class RunCalculator {
                     right: Box::new(Expr::Integer(3)),
                 },
                 is_pub: false,
+                span: dummy_span(),
             }),
             Item::Function(Function {
                 name: "addTen".to_string(),
@@ -104,6 +143,7 @@ public class RunCalculator {
                     right: Box::new(Expr::Integer(10)),
                 },
                 is_pub: false,
+                span: dummy_span(),
             }),
             Item::Function(Function {
                 name: "compute".to_string(),
@@ -117,13 +157,15 @@ public class RunCalculator {
                     }),
                 },
                 is_pub: true,
+                span: dummy_span(),
             }),
         ],
     };
 
     let mut transpiler = JavaTranspiler::new("PipeDemo");
-    let bytecode = transpiler.transpile(&program).expect("Failed to transpile");
-    fs::write("PipeDemo.class", &bytecode).expect("Failed to write class file");
+    let jar_bytes = transpiler.transpile(&program).expect("Failed to transpile");
+    fs::write("PipeDemo.jar", &jar_bytes).expect("Failed to write jar file");
+    write_classes_from_jar(&jar_bytes).expect("Failed to extract PipeDemo classes");
 
     let wrapper = r#"
 public class RunPipeDemo {
@@ -137,7 +179,7 @@ public class RunPipeDemo {
 "#;
     fs::write("RunPipeDemo.java", wrapper).expect("Failed to write wrapper");
 
-    let compile = Command::new("javac").args(&["RunPipeDemo.java"]).output();
+    let compile = Command::new("javac").args(["RunPipeDemo.java"]).output();
 
     if let Ok(output) = compile {
         if output.status.success() {

@@ -2,7 +2,41 @@ use flow_ast::*;
 use flow_transpiler::Transpiler;
 use flow_transpiler_java::JavaTranspiler;
 use std::fs;
+use std::io::{self, Cursor};
+use std::path::Path;
 use std::process::Command;
+
+use zip::ZipArchive;
+
+fn dummy_span() -> Span {
+    Span::new(0, 0)
+}
+
+fn write_classes_from_jar(bytes: &[u8]) -> io::Result<Vec<String>> {
+    let cursor = Cursor::new(bytes);
+    let mut archive = ZipArchive::new(cursor)?;
+    let mut written = Vec::new();
+
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i)?;
+        if file.name().ends_with('/') {
+            continue;
+        }
+
+        let path = Path::new(file.name());
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                fs::create_dir_all(parent)?;
+            }
+        }
+
+        let mut out_file = fs::File::create(path)?;
+        io::copy(&mut file, &mut out_file)?;
+        written.push(file.name().to_string());
+    }
+
+    Ok(written)
+}
 
 fn main() {
     println!("Testing Java Bytecode Generation\n");
@@ -10,25 +44,38 @@ fn main() {
     // Test 1: Simple function
     println!("1. Testing simple function...");
     let program = Program {
+        namespace: None,
         items: vec![Item::Function(Function {
             name: "getValue".to_string(),
             params: vec![],
             return_type: Some(Type::I64),
             body: Expr::Integer(42),
             is_pub: true,
+            span: dummy_span(),
         })],
     };
 
     let mut transpiler = JavaTranspiler::new("SimpleTest");
-    let bytecode = transpiler.transpile(&program).expect("Failed to transpile");
-    fs::write("SimpleTest.class", &bytecode).expect("Failed to write class file");
-    println!("   Generated SimpleTest.class ({} bytes)", bytecode.len());
+    let jar_bytes = transpiler.transpile(&program).expect("Failed to transpile");
+    fs::write("SimpleTest.jar", &jar_bytes).expect("Failed to write jar file");
+    let class_files =
+        write_classes_from_jar(&jar_bytes).expect("Failed to extract SimpleTest classes");
+    let class_name = class_files
+        .iter()
+        .find(|name| name.ends_with("SimpleTest.class"))
+        .or_else(|| class_files.iter().find(|name| name.ends_with(".class")))
+        .expect("No class file generated")
+        .to_string();
+    let class_bytes = fs::read(&class_name).expect("Failed to read generated class");
+    println!(
+        "   Generated SimpleTest.jar ({} bytes), extracted {} ({} bytes)",
+        jar_bytes.len(),
+        class_name,
+        class_bytes.len()
+    );
 
     // Verify with javap
-    let output = Command::new("javap")
-        .arg("-v")
-        .arg("SimpleTest.class")
-        .output();
+    let output = Command::new("javap").arg("-v").arg(&class_name).output();
 
     if let Ok(output) = output {
         println!(
@@ -53,6 +100,7 @@ fn main() {
     // Test 2: Arithmetic operations
     println!("\n2. Testing arithmetic operations...");
     let program = Program {
+        namespace: None,
         items: vec![Item::Function(Function {
             name: "add".to_string(),
             params: vec![
@@ -72,20 +120,33 @@ fn main() {
                 right: Box::new(Expr::Ident("b".to_string())),
             },
             is_pub: true,
+            span: dummy_span(),
         })],
     };
 
     let mut transpiler = JavaTranspiler::new("ArithmeticTest");
-    let bytecode = transpiler.transpile(&program).expect("Failed to transpile");
-    fs::write("ArithmeticTest.class", &bytecode).expect("Failed to write class file");
+    let jar_bytes = transpiler.transpile(&program).expect("Failed to transpile");
+    fs::write("ArithmeticTest.jar", &jar_bytes).expect("Failed to write jar file");
+    let class_files =
+        write_classes_from_jar(&jar_bytes).expect("Failed to extract ArithmeticTest classes");
+    let class_name = class_files
+        .iter()
+        .find(|name| name.ends_with("ArithmeticTest.class"))
+        .or_else(|| class_files.iter().find(|name| name.ends_with(".class")))
+        .expect("No class file generated")
+        .to_string();
+    let class_bytes = fs::read(&class_name).expect("Failed to read generated class");
     println!(
-        "   Generated ArithmeticTest.class ({} bytes)",
-        bytecode.len()
+        "   Generated ArithmeticTest.jar ({} bytes), extracted {} ({} bytes)",
+        jar_bytes.len(),
+        class_name,
+        class_bytes.len()
     );
 
     // Test 3: Complex example with pipes
     println!("\n3. Testing pipe operator...");
     let program = Program {
+        namespace: None,
         items: vec![
             Item::Function(Function {
                 name: "double".to_string(),
@@ -100,6 +161,7 @@ fn main() {
                     right: Box::new(Expr::Integer(2)),
                 },
                 is_pub: false,
+                span: dummy_span(),
             }),
             Item::Function(Function {
                 name: "compute".to_string(),
@@ -110,14 +172,29 @@ fn main() {
                     right: Box::new(Expr::Ident("double".to_string())),
                 },
                 is_pub: true,
+                span: dummy_span(),
             }),
         ],
     };
 
     let mut transpiler = JavaTranspiler::new("PipeTest");
-    let bytecode = transpiler.transpile(&program).expect("Failed to transpile");
-    fs::write("PipeTest.class", &bytecode).expect("Failed to write class file");
-    println!("   Generated PipeTest.class ({} bytes)", bytecode.len());
+    let jar_bytes = transpiler.transpile(&program).expect("Failed to transpile");
+    fs::write("PipeTest.jar", &jar_bytes).expect("Failed to write jar file");
+    let class_files =
+        write_classes_from_jar(&jar_bytes).expect("Failed to extract PipeTest classes");
+    let class_name = class_files
+        .iter()
+        .find(|name| name.ends_with("PipeTest.class"))
+        .or_else(|| class_files.iter().find(|name| name.ends_with(".class")))
+        .expect("No class file generated")
+        .to_string();
+    let class_bytes = fs::read(&class_name).expect("Failed to read generated class");
+    println!(
+        "   Generated PipeTest.jar ({} bytes), extracted {} ({} bytes)",
+        jar_bytes.len(),
+        class_name,
+        class_bytes.len()
+    );
 
     println!("\n✓ All tests completed successfully!");
     println!("\nGenerated class files:");

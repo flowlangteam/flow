@@ -1,6 +1,0 @@
-// Test file with analysis errors
-func main() -> i64 {
-    let x = nonexistent_function(5, 3);
-    let y = another_undefined_function();
-    x + y
-}
