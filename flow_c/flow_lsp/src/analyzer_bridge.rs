@@ -6,29 +6,30 @@ use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range, Url}
 
 /// Bridge between Flow analyzer and LSP diagnostics
 pub struct AnalyzerBridge {
-    analyzer: Analyzer,
+    // Analyzer is stateless, create fresh for each analysis
 }
 
 impl AnalyzerBridge {
     pub fn new() -> Self {
-        Self {
-            analyzer: Analyzer::new(),
-        }
+        Self {}
     }
 
     /// Analyze a document and return LSP diagnostics
     pub fn analyze_document(&mut self, _uri: &Url, text: &str) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
 
+        // Create a fresh analyzer to avoid state accumulation
+        let mut analyzer = Analyzer::new();
+
         // Parse the document
         let mut parser = Parser::new(text);
         match parser.parse() {
             Ok(program) => {
                 // Analyze the parsed program
-                match self.analyzer.analyze(&program) {
+                match analyzer.analyze(&program) {
                     Ok(()) => {
                         // No errors, but check for warnings
-                        for warning in self.analyzer.get_warnings() {
+                        for warning in analyzer.get_warnings() {
                             if let Some(diagnostic) = self.warning_to_diagnostic(warning, text) {
                                 diagnostics.push(diagnostic);
                             }
@@ -75,11 +76,14 @@ impl AnalyzerBridge {
     pub fn get_completions(&mut self, text: &str, _position: Position) -> Vec<CompletionItem> {
         let mut completions = Vec::new();
 
+        // Create a fresh analyzer
+        let mut analyzer = Analyzer::new();
+
         // Parse the document to get context
         let mut parser = Parser::new(text);
         if let Ok(program) = parser.parse() {
             // Analyze to get scope information
-            if self.analyzer.analyze(&program).is_ok() {
+            if analyzer.analyze(&program).is_ok() {
                 // Add keyword completions
                 completions.extend(self.get_keyword_completions());
 
@@ -95,14 +99,15 @@ impl AnalyzerBridge {
     }
 
     /// Get hover information for a position
-    pub fn get_hover_info(&mut self, text: &str, _position: Position) -> Option<String> {
+    pub fn get_hover_info(&mut self, text: &str, _position: Position, word: &str) -> Option<String> {
+        // Create a fresh analyzer
+        let mut analyzer = Analyzer::new();
+        
         let mut parser = Parser::new(text);
         if let Ok(program) = parser.parse() {
-            if self.analyzer.analyze(&program).is_ok() {
-                // Try to find what's at this position and provide type information
-                // This is a simplified implementation - in reality, you'd need to
-                // traverse the AST to find the node at the given position
-                return Some("Type information would go here".to_string());
+            if analyzer.analyze(&program).is_ok() {
+                // Look up the symbol in the analyzer's scope
+                return analyzer.lookup_symbol(word);
             }
         }
         None

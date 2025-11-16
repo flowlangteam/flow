@@ -71,13 +71,15 @@ impl Handlers {
         let word = document.word_at_position(&position)?;
 
         let mut analyzer = self.analyzer_bridge.write().await;
-        let hover_info = analyzer.get_hover_info(&text, position)?;
+        let hover_info = analyzer.get_hover_info(&text, position, &word)?;
 
-        // Create a simple hover response
-        let contents = HoverContents::Scalar(MarkedString::String(format!(
-            "**{}**\n\n{}",
-            word, hover_info
-        )));
+        // Create a simple hover response with code formatting
+        let contents = HoverContents::Scalar(MarkedString::LanguageString(
+            tower_lsp::lsp_types::LanguageString {
+                language: "flow".to_string(),
+                value: hover_info,
+            }
+        ));
 
         Some(Hover {
             contents,

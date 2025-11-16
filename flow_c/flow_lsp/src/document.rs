@@ -27,6 +27,7 @@ impl Document {
         match &change.range {
             Some(range) => {
                 // Incremental change
+                tracing::debug!("Applying incremental change at {:?}", range);
                 let start_offset = self.position_to_offset(&range.start)?;
                 let end_offset = self.position_to_offset(&range.end)?;
 
@@ -36,6 +37,7 @@ impl Document {
             }
             None => {
                 // Full document replacement
+                tracing::debug!("Applying full document replacement, new length: {}", change.text.len());
                 self.text = Rope::from_str(&change.text);
             }
         }
@@ -148,10 +150,12 @@ impl DocumentManager {
         changes: Vec<TextDocumentContentChangeEvent>,
     ) -> Result<()> {
         if let Some(mut document) = self.documents.get_mut(uri) {
+            tracing::debug!("Changing document, version: {}, changes count: {}", version, changes.len());
             document.version = version;
             for change in changes {
                 document.apply_change(&change)?;
             }
+            tracing::debug!("Document after changes, length: {}", document.text.len_chars());
         }
         Ok(())
     }

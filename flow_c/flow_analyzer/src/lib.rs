@@ -153,6 +153,40 @@ impl Analyzer {
         &self.errors
     }
 
+    /// Look up a symbol (variable, function, or struct) and return its type information
+    pub fn lookup_symbol(&self, name: &str) -> Option<String> {
+        // Search in reverse order (inner to outer scope)
+        for scope in self.scopes.iter().rev() {
+            // Check variables
+            if let Some(var_info) = scope.variables.get(name) {
+                return Some(format!("{} {}", if var_info.mutable { "mut" } else { "let" }, format_type(&var_info.ty)));
+            }
+            
+            // Check functions
+            if let Some(func_info) = scope.functions.get(name) {
+                let params_str = func_info.params.iter()
+                    .map(|p| format!("{}: {}", p.name, format_type(&p.ty)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let return_str = func_info.return_type.as_ref()
+                    .map(|t| format!(" -> {}", format_type(t)))
+                    .unwrap_or_default();
+                return Some(format!("func {}({}){}", name, params_str, return_str));
+            }
+            
+            // Check structs
+            if let Some(struct_info) = scope.structs.get(name) {
+                let fields_str = struct_info.fields.iter()
+                    .map(|f| format!("{}: {}", f.name, format_type(&f.ty)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Some(format!("struct {} {{ {} }}", name, fields_str));
+            }
+        }
+        
+        None
+    }
+
     fn declare_function(&mut self, func: &Function) -> Result<(), Vec<AnalysisError>> {
         let info = FunctionInfo {
             params: func.params.clone(),
@@ -1471,6 +1505,46 @@ mod tests {
         assert!(analyzer.types_compatible(&Type::F64, &Type::I16));
         assert!(!analyzer.types_compatible(&Type::Bool, &Type::I32));
     }
+}
+
+/// Format a type for display
+fn format_type(ty: &Type) -> String {
+    match ty {
+        Type::I8 => "i8".to_string(),
+        Type::I16 => "i16".to_string(),
+        Type::I32 => "i32".to_string(),
+        Type::I64 => "i64".to_string(),
+        Type::I128 => "i128".to_string(),
+        Type::U8 => "u8".to_string(),
+        Type::U16 => "u16".to_string(),
+        Type::U32 => "u32".to_string(),
+        Type::U64 => "u64".to_string(),
+        Type::U128 => "u128".to_string(),
+        Type::F32 => "f32".to_string(),
+        Type::F64 => "f64".to_string(),
+        Type::Bool => "bool".to_string(),
+        Type::Char => "char".to_string(),
+        Type::String => "String".to_string(),
+        Type::Unit => "()".to_string(),
+        Type::Named(name) => name.clone(),
+        Type::Pointer(inner) => format!("*{}", format_type(inner)),
+        Type::MutPointer(inner) => format!("*mut {}", format_type(inner)),
+        Type::Array(inner, size) => format!("[{}; {}]", format_type(inner), size),
+        Type::Slice(inner) => format!("[{}]", format_type(inner)),
+        Type::Function(params, ret) => {
+            let params_str = params.iter()
+                .map(|t| format_type(t))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("fn({}) -> {}", params_str, format_type(ret))
+        },
+        Type::TypeVar(name) => format!("<{}>", name),
+    }
+}
+
+#[cfg(test)]
+mod tests_extra {
+    use super::*;
 
     #[test]
     fn test_higher_order_function_call_analysis() {
