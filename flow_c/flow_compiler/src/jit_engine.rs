@@ -771,7 +771,8 @@ impl Default for EngineSettings {
         Self {
             opt_level: settings::OptLevel::None,
             enable_verifier: false,
-            is_pic: !cfg!(target_os = "macos"),
+            // JIT mode always requires is_pic=false
+            is_pic: false,
         }
     }
 }
@@ -965,17 +966,33 @@ impl EngineSettings {
             _ => settings::OptLevel::SpeedAndSize,
         };
 
+        // For JIT mode, is_pic must be false
+        // For AOT mode, is_pic should be true on most platforms for relocatable code
+        let default_is_pic = match config.target {
+            crate::CompilationTarget::Native => {
+                // AOT compilation: use PIC on Linux, not on macOS
+                !cfg!(target_os = "macos")
+            }
+            crate::CompilationTarget::Jit => {
+                // JIT requires is_pic=false
+                false
+            }
+            _ => {
+                // Other targets (transpilation) don't use Cranelift
+                false
+            }
+        };
+
         let mut settings = Self {
             opt_level,
             enable_verifier: config.debug_info,
-            is_pic: !cfg!(target_os = "macos"),
+            is_pic: default_is_pic,
         };
 
+        // Allow explicit override via flags
         if let Some(pic_flag) = config.flags.get("pic") {
             let normalized = pic_flag.trim().to_ascii_lowercase();
             settings.is_pic = matches!(normalized.as_str(), "1" | "true" | "yes" | "on");
-        } else if config.target == crate::CompilationTarget::Native && cfg!(target_os = "macos") {
-            settings.is_pic = true;
         }
 
         settings
