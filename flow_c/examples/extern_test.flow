@@ -1,0 +1,31 @@
+// Test extern blocks with various languages and function signatures
+
+extern "C" {
+    func abs(i64) -> i64;
+    func sqrt(f64) -> f64;
+    func strlen(String) -> i64;
+}
+
+extern "Java" {
+    func println(String);
+    func currentTimeMillis() -> i64;
+}
+
+func test_c_extern() -> i64 {
+    return abs(-42);
+}
+
+func test_java_extern() {
+    println("Hello from extern!");
+}
+
+func test_math() -> f64 {
+    return sqrt(16.0);
+}
+
+func main() -> i64 {
+    let a = test_c_extern();
+    test_java_extern();
+    let b = test_math();
+    return a;
+}

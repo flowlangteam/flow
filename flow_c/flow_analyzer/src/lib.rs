@@ -7,12 +7,10 @@ pub struct Analyzer {
     warnings: Vec<Warning>,
     errors: Vec<AnalysisError>,
     scopes: Vec<Scope>,
-    // Multi-file support
     modules: HashMap<String, ModuleInfo>,
     current_namespace: Option<String>,
     module_search_paths: Vec<PathBuf>,
     parsed_modules: HashMap<String, Program>,
-    // Source tracking
     current_source: Option<String>,
     current_file_path: Option<String>,
 }
@@ -94,7 +92,6 @@ impl Analyzer {
     }
 
     pub fn analyze(&mut self, program: &Program) -> Result<(), Vec<AnalysisError>> {
-        // Handle namespace declaration
         if let Some(namespace_decl) = &program.namespace {
             self.current_namespace = Some(format!(
                 "{}::{}",
@@ -102,7 +99,6 @@ impl Analyzer {
             ));
         }
 
-        // First pass: collect all top-level declarations and process imports
         for item in &program.items {
             match item {
                 Item::Function(func) => {
@@ -115,13 +111,10 @@ impl Analyzer {
                     self.process_use_declaration(use_decl)?;
                 }
                 Item::Attribute(_) => {}
-                Item::Import(_) | Item::ExternBlock(_) | Item::Impl(_) => {
-                    // These are handled in the second pass or don't need first-pass processing
-                }
+                Item::Import(_) | Item::ExternBlock(_) | Item::Impl(_) => {}
             }
         }
 
-        // Second pass: type check and analyze each item
         for item in &program.items {
             match item {
                 Item::Function(func) => {
@@ -135,7 +128,6 @@ impl Analyzer {
             }
         }
 
-        // Check for unused items
         self.check_unused();
 
         if self.errors.is_empty() {
@@ -153,37 +145,42 @@ impl Analyzer {
         &self.errors
     }
 
-    /// Look up a symbol (variable, function, or struct) and return its type information
     pub fn lookup_symbol(&self, name: &str) -> Option<String> {
-        // Search in reverse order (inner to outer scope)
         for scope in self.scopes.iter().rev() {
-            // Check variables
             if let Some(var_info) = scope.variables.get(name) {
-                return Some(format!("{} {}", if var_info.mutable { "mut" } else { "let" }, format_type(&var_info.ty)));
+                return Some(format!(
+                    "{} {}",
+                    if var_info.mutable { "mut" } else { "let" },
+                    format_type(&var_info.ty)
+                ));
             }
-            
-            // Check functions
+
             if let Some(func_info) = scope.functions.get(name) {
-                let params_str = func_info.params.iter()
+                let params_str = func_info
+                    .params
+                    .iter()
                     .map(|p| format!("{}: {}", p.name, format_type(&p.ty)))
                     .collect::<Vec<_>>()
                     .join(", ");
-                let return_str = func_info.return_type.as_ref()
+                let return_str = func_info
+                    .return_type
+                    .as_ref()
                     .map(|t| format!(" -> {}", format_type(t)))
                     .unwrap_or_default();
                 return Some(format!("func {}({}){}", name, params_str, return_str));
             }
-            
-            // Check structs
+
             if let Some(struct_info) = scope.structs.get(name) {
-                let fields_str = struct_info.fields.iter()
+                let fields_str = struct_info
+                    .fields
+                    .iter()
                     .map(|f| format!("{}: {}", f.name, format_type(&f.ty)))
                     .collect::<Vec<_>>()
                     .join(", ");
                 return Some(format!("struct {} {{ {} }}", name, fields_str));
             }
         }
-        
+
         None
     }
 
@@ -191,7 +188,7 @@ impl Analyzer {
         let info = FunctionInfo {
             params: func.params.clone(),
             return_type: func.return_type.clone(),
-            used: func.name == "main", // main is always considered used
+            used: func.name == "main",
             span: Span::new(0, 0),
         };
 
@@ -236,15 +233,12 @@ impl Analyzer {
     fn process_use_declaration(&mut self, use_decl: &UseDecl) -> Result<(), Vec<AnalysisError>> {
         let module_key = format!("{}::{}", use_decl.namespace, use_decl.filename);
 
-        // Check if module is already loaded
         if self.modules.contains_key(&module_key) {
             return Ok(());
         }
 
-        // Find and load the module file
         let module_file_path = self.find_module_file(&use_decl.namespace, &use_decl.filename)?;
 
-        // Read and parse the module
         let source = fs::read_to_string(&module_file_path).map_err(|e| {
             vec![AnalysisError {
                 message: format!(
@@ -280,7 +274,6 @@ impl Analyzer {
             }]
         })?;
 
-        // Verify the module has the correct namespace declaration
         if let Some(namespace_decl) = &module_program.namespace {
             let declared_key = format!("{}::{}", namespace_decl.namespace, namespace_decl.filename);
             if declared_key != module_key {
@@ -301,7 +294,6 @@ impl Analyzer {
             }]);
         }
 
-        // Extract public items from the module
         let mut public_functions = HashMap::new();
         let mut public_structs = HashMap::new();
 
@@ -325,11 +317,10 @@ impl Analyzer {
                     };
                     public_structs.insert(struct_def.name.clone(), struct_info);
                 }
-                _ => {} // Private items or other types
+                _ => {}
             }
         }
 
-        // Store the module info
         let module_info = ModuleInfo {
             namespace: use_decl.namespace.clone(),
             filename: use_decl.filename.clone(),
@@ -338,8 +329,6 @@ impl Analyzer {
             file_path: module_file_path,
         };
         self.modules.insert(module_key.clone(), module_info);
-
-        // Store the parsed program for later use in codegen
         self.parsed_modules.insert(module_key, module_program);
 
         Ok(())
@@ -351,14 +340,12 @@ impl Analyzer {
         filename: &str,
     ) -> Result<PathBuf, Vec<AnalysisError>> {
         for search_path in &self.module_search_paths {
-            // First try namespace/filename.flow structure (preferred)
             let namespace_dir = search_path.join(namespace);
             let candidate = namespace_dir.join(format!("{}.flow", filename));
             if candidate.exists() {
                 return Ok(candidate);
             }
 
-            // Fallback to namespace_filename.flow format
             let module_filename = format!("{}_{}.flow", namespace, filename);
             let candidate = search_path.join(&module_filename);
             if candidate.exists() {
@@ -415,19 +402,16 @@ impl Analyzer {
             }
         }
 
-        // Fallback to a default span
         Span::new(0, 0)
     }
 
     fn find_identifier_span(&self, source: &str, name: &str, file_path: &str) -> Span {
-        // Find all occurrences of the identifier
         let mut matches = Vec::new();
         let mut start = 0;
 
         while let Some(pos) = source[start..].find(name) {
             let absolute_pos = start + pos;
 
-            // Check if this is a whole word (not part of another identifier)
             let is_word_start = absolute_pos == 0
                 || !source
                     .chars()
@@ -457,7 +441,6 @@ impl Analyzer {
             };
         }
 
-        // Fallback
         Span::new(0, 0)
     }
 
@@ -470,19 +453,15 @@ impl Analyzer {
         func: &Function,
         self_struct: Option<&str>,
     ) -> Result<(), Vec<AnalysisError>> {
-        // Create new scope for function
         self.push_scope();
 
-        // Add parameters to scope
         for param in &func.params {
             let resolved_ty = resolve_self_type(&param.ty, self_struct);
             self.declare_variable(&param.name, &resolved_ty, false, Span::new(0, 0))?;
         }
 
-        // Analyze function body
         let body_type = self.analyze_expr(&func.body)?;
 
-        // Check return type matches
         if let Some(ref expected_type) = func.return_type {
             let resolved_expected = resolve_self_type(expected_type, self_struct);
             if !self.types_compatible(&body_type, &resolved_expected) {
@@ -570,7 +549,6 @@ impl Analyzer {
         expr: &Expr,
         expr_span: Span,
     ) -> Result<Type, Vec<AnalysisError>> {
-        // If we have a default span (0, 0), try to estimate a better one
         let span = if expr_span.start == 0 && expr_span.end == 0 {
             self.estimate_expression_span(expr)
         } else {
@@ -578,7 +556,7 @@ impl Analyzer {
         };
 
         match expr {
-            Expr::Integer(_) => Ok(Type::I64), // Default integer type
+            Expr::Integer(_) => Ok(Type::I64),
             Expr::Float(_) => Ok(Type::F64),
             Expr::Bool(_) => Ok(Type::Bool),
             Expr::String(_) => Ok(Type::String),
@@ -594,7 +572,7 @@ impl Analyzer {
                         span: Span::new(0, 0),
                         severity: Severity::Error,
                     });
-                    Ok(Type::Unit) // Return dummy type to continue analysis
+                    Ok(Type::Unit)
                 }
             }
 
@@ -634,7 +612,6 @@ impl Analyzer {
             } => {
                 let value_type = self.analyze_expr(value)?;
 
-                // Check if type annotation matches inferred type
                 if let Some(annotated_type) = ty {
                     if !self.types_compatible(&value_type, annotated_type) {
                         self.errors.push(AnalysisError {
@@ -695,7 +672,6 @@ impl Analyzer {
                     if let Some(func_info) = self.find_function(name) {
                         self.mark_function_used(name);
 
-                        // Check argument count
                         if args.len() != func_info.params.len() {
                             self.errors.push(AnalysisError {
                                 message: format!(
@@ -709,7 +685,6 @@ impl Analyzer {
                             });
                         }
 
-                        // Check argument types
                         for (i, (arg, param)) in
                             args.iter().zip(func_info.params.iter()).enumerate()
                         {
@@ -939,7 +914,6 @@ impl Analyzer {
                 self.push_scope();
                 let result = self.analyze_expr(body)?;
 
-                // Check for leaking allocations
                 if let Some(scope) = self.scopes.last() {
                     if !scope.temp_allocations.is_empty() {
                         self.warnings.push(Warning::PossibleMemoryLeak {
@@ -994,7 +968,7 @@ impl Analyzer {
                 self.analyze_expr(body)
             }
 
-            _ => Ok(Type::Unit), // Placeholder for unimplemented expressions
+            _ => Ok(Type::Unit),
         }
     }
 
@@ -1124,26 +1098,22 @@ impl Analyzer {
     }
 
     fn find_function(&self, name: &str) -> Option<FunctionInfo> {
-        // First check local scopes
         for scope in self.scopes.iter().rev() {
             if let Some(info) = scope.functions.get(name) {
                 return Some(info.clone());
             }
         }
 
-        // If not found locally, check if it's a namespaced function call
         if name.contains("::") {
             let parts: Vec<&str> = name.split("::").collect();
             if parts.len() == 2 {
                 let (namespace_or_alias, function_name) = (parts[0], parts[1]);
 
-                // Look for a module that matches this namespace/alias
                 for (module_key, module_info) in &self.modules {
                     let module_parts: Vec<&str> = module_key.split("::").collect();
                     if module_parts.len() == 2 {
                         let (ns, filename) = (module_parts[0], module_parts[1]);
 
-                        // Check if the namespace_or_alias matches the namespace, filename, or full key
                         if namespace_or_alias == ns
                             || namespace_or_alias == filename
                             || namespace_or_alias == module_key
@@ -1162,7 +1132,6 @@ impl Analyzer {
     }
 
     fn mark_function_used(&mut self, name: &str) {
-        // First try local scopes
         for scope in self.scopes.iter_mut().rev() {
             if let Some(info) = scope.functions.get_mut(name) {
                 info.used = true;
@@ -1258,7 +1227,6 @@ impl Analyzer {
 
     fn pop_scope(&mut self) {
         if let Some(scope) = self.scopes.pop() {
-            // Check for unused variables
             for (name, info) in scope.variables {
                 if !info.used && !name.starts_with('_') {
                     self.warnings.push(Warning::UnusedVariable {
@@ -1484,7 +1452,6 @@ mod tests {
             ],
         };
         let mut analyzer = Analyzer::new();
-        // Add the test files directory to search path
         analyzer.add_module_search_path(PathBuf::from("test_files"));
 
         let result = analyzer.analyze(&program);
@@ -1532,12 +1499,13 @@ fn format_type(ty: &Type) -> String {
         Type::Array(inner, size) => format!("[{}; {}]", format_type(inner), size),
         Type::Slice(inner) => format!("[{}]", format_type(inner)),
         Type::Function(params, ret) => {
-            let params_str = params.iter()
+            let params_str = params
+                .iter()
                 .map(|t| format_type(t))
                 .collect::<Vec<_>>()
                 .join(", ");
             format!("fn({}) -> {}", params_str, format_type(ret))
-        },
+        }
         Type::TypeVar(name) => format!("<{}>", name),
     }
 }

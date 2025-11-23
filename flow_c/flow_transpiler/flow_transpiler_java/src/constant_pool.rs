@@ -60,6 +60,10 @@ impl ConstantPool {
         }
     }
 
+    pub fn count(&self) -> usize {
+        self.entries.len()
+    }
+
     pub fn add_utf8(&mut self, value: impl Into<String>) -> u16 {
         let value = value.into();
         if let Some(&index) = self.utf8_map.get(&value) {

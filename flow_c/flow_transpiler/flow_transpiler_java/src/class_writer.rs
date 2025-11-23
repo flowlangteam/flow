@@ -106,20 +106,39 @@ impl ClassWriter {
     }
 
     pub fn write_bytes(&mut self) -> Result<Vec<u8>> {
+        eprintln!(
+            "DEBUG ClassWriter: Writing class '{}' with {} methods",
+            self.class_name,
+            self.methods.len()
+        );
+        for (i, method) in self.methods.iter().enumerate() {
+            eprintln!(
+                "  Method {}: {} (descriptor: {})",
+                i, method.name, method.descriptor
+            );
+        }
+
         let mut bytes = Vec::new();
 
         // Magic number
         bytes.write_u32::<BigEndian>(0xCAFEBABE)?;
+        eprintln!("After magic: {} bytes", bytes.len());
 
         // Minor and major version
         bytes.write_u16::<BigEndian>(0)?; // minor
         bytes.write_u16::<BigEndian>(JAVA_VERSION)?; // major
+        eprintln!("After version: {} bytes", bytes.len());
 
         // Build constant pool with all necessary entries
         self.build_constant_pool();
+        eprintln!(
+            "Constant pool built, entries: {}",
+            self.constant_pool.count()
+        );
 
         // Write constant pool
         self.constant_pool.write(&mut bytes)?;
+        eprintln!("After constant pool: {} bytes", bytes.len());
 
         // Access flags
         bytes.write_u16::<BigEndian>(self.access_flags)?;
@@ -131,6 +150,7 @@ impl ClassWriter {
         // Super class (already added in build_constant_pool)
         let super_class_index = self.constant_pool.get_class_index(&self.super_class);
         bytes.write_u16::<BigEndian>(super_class_index)?;
+        eprintln!("After class refs: {} bytes", bytes.len());
 
         // Interfaces
         bytes.write_u16::<BigEndian>(self.interfaces.len() as u16)?;
@@ -138,6 +158,7 @@ impl ClassWriter {
             let interface_index = self.constant_pool.get_class_index(interface);
             bytes.write_u16::<BigEndian>(interface_index)?;
         }
+        eprintln!("After interfaces: {} bytes", bytes.len());
 
         // Fields
         bytes.write_u16::<BigEndian>(self.fields.len() as u16)?;
@@ -149,16 +170,40 @@ impl ClassWriter {
             bytes.write_u16::<BigEndian>(desc_index)?;
             bytes.write_u16::<BigEndian>(0)?; // attributes count
         }
+        eprintln!("After fields: {} bytes", bytes.len());
 
         // Methods
+        eprintln!("About to write {} methods", self.methods.len());
+        let bytes_before_methods = bytes.len();
         bytes.write_u16::<BigEndian>(self.methods.len() as u16)?;
+        eprintln!("Wrote method count, bytes: {}", bytes.len());
+
         let methods_clone = self.methods.clone();
-        for method in &methods_clone {
+        for (idx, method) in methods_clone.iter().enumerate() {
+            let before = bytes.len();
             self.write_method(&mut bytes, method)?;
+            let after = bytes.len();
+            eprintln!(
+                "  Method {} added {} bytes (total now: {})",
+                idx,
+                after - before,
+                after
+            );
         }
+        eprintln!(
+            "After all methods: {} bytes (added {} bytes total)",
+            bytes.len(),
+            bytes.len() - bytes_before_methods
+        );
 
         // Class attributes
         bytes.write_u16::<BigEndian>(0)?; // attributes count
+        eprintln!("After class attributes: {} bytes", bytes.len());
+
+        eprintln!(
+            "DEBUG write_bytes: Final bytes vector length: {} bytes",
+            bytes.len()
+        );
 
         Ok(bytes)
     }
@@ -179,8 +224,13 @@ impl ClassWriter {
         }
 
         // Add method names, descriptors, and process code
+        eprintln!(
+            "build_constant_pool: Processing {} methods",
+            self.methods.len()
+        );
         for i in 0..self.methods.len() {
             let method = &self.methods[i];
+            eprintln!("  Adding constants for method: {}", method.name);
             self.constant_pool.add_utf8(&method.name);
             self.constant_pool.add_utf8(&method.descriptor);
             self.constant_pool.add_utf8("Code");
@@ -230,21 +280,41 @@ impl ClassWriter {
     }
 
     fn write_method(&mut self, bytes: &mut Vec<u8>, method: &MethodInfo) -> Result<()> {
+        eprintln!(
+            "DEBUG write_method: Writing method '{}' (descriptor: {}, has_code: {})",
+            method.name,
+            method.descriptor,
+            method.code.is_some()
+        );
+
+        let bytes_before = bytes.len();
+
         bytes.write_u16::<BigEndian>(method.access_flags)?;
 
         let name_index = self.constant_pool.get_utf8_index(&method.name);
+        eprintln!("  name_index: {}", name_index);
         bytes.write_u16::<BigEndian>(name_index)?;
 
         let desc_index = self.constant_pool.get_utf8_index(&method.descriptor);
+        eprintln!("  desc_index: {}", desc_index);
         bytes.write_u16::<BigEndian>(desc_index)?;
 
         // Attributes
         if let Some(code) = &method.code {
+            eprintln!("  Writing Code attribute with {} instructions", code.len());
             bytes.write_u16::<BigEndian>(1)?; // One attribute (Code)
             self.write_code_attribute(bytes, method, code)?;
         } else {
+            eprintln!("  No code (native method)");
             bytes.write_u16::<BigEndian>(0)?; // No attributes
         }
+
+        let bytes_after = bytes.len();
+        eprintln!(
+            "  Wrote {} bytes for method '{}'",
+            bytes_after - bytes_before,
+            method.name
+        );
 
         Ok(())
     }

@@ -143,14 +143,12 @@ fn run_file(path: &PathBuf, show_stats: bool, verbose: bool, quiet: bool) -> Res
         );
     }
 
-    // File reading
     let source = fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
 
     if verbose {
         println!("  {} Read {} bytes", "ℹ".blue(), style(source.len()).cyan());
     }
 
-    // Parsing with rich error reporting
     let spinner = create_spinner("Parsing...", quiet);
     let mut parser = FlowParser::new(&source);
     let program = match parser.parse() {
@@ -161,7 +159,6 @@ fn run_file(path: &PathBuf, show_stats: bool, verbose: bool, quiet: bool) -> Res
         Err(diag) => {
             spinner.finish_and_clear();
 
-            // Use rich error reporting for parse errors
             let path_str = path.to_string_lossy().to_string();
             let rich_error = diagnostic_to_rich(&diag, &path_str);
             display_rich_errors(&[rich_error], &path_str, &source);
@@ -178,10 +175,8 @@ fn run_file(path: &PathBuf, show_stats: bool, verbose: bool, quiet: bool) -> Res
         );
     }
 
-    // Analyzing and compiling
     let spinner = create_spinner("Compiling with JIT...", quiet);
 
-    // Create compiler using the unified API
     let mut compiler = FlowCompilerBuilder::new()
         .target(CompilationTarget::Jit)
         .optimization_level(0)
@@ -208,9 +203,7 @@ fn run_file(path: &PathBuf, show_stats: bool, verbose: bool, quiet: bool) -> Res
         println!("\n{}", "─".repeat(70));
     }
 
-    // Execute the main function
     if let flow_compiler::CompilerOutput::Jit(any_func) = result {
-        // Extract the function pointer from the Any box
         let code_ptr = any_func
             .downcast_ref::<*const u8>()
             .ok_or("Failed to extract function pointer from JIT result")?;
@@ -263,7 +256,6 @@ fn build_file(
         }
     }
 
-    // Reading file
     let spinner = create_spinner("Reading source file...", quiet);
     let source = fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
     spinner.finish_and_clear();
@@ -272,7 +264,6 @@ fn build_file(
         println!("  {} Read {} bytes", "ℹ".blue(), style(source.len()).cyan());
     }
 
-    // Parsing
     let spinner = create_spinner("Parsing...", quiet);
     let mut parser = FlowParser::new(&source);
     let program = match parser.parse() {
@@ -297,10 +288,8 @@ fn build_file(
         );
     }
 
-    // Compilation with the unified compiler
     let spinner = create_spinner("Compiling to native code...", quiet);
 
-    // Create AOT compiler
     let mut compiler = FlowCompilerBuilder::new()
         .target(CompilationTarget::Native)
         .optimization_level(if release { 2 } else { 0 })
@@ -359,7 +348,6 @@ fn build_file(
         );
     }
 
-    // Determine output name
     let output_name = output.unwrap_or_else(|| {
         path.file_stem()
             .unwrap()
@@ -377,7 +365,6 @@ fn build_file(
 
     #[cfg(unix)]
     {
-        // Ensure generated binaries are runnable on Unix-like hosts.
         let mut perms = std::fs::metadata(&output_name)
             .map_err(|e| {
                 format!(
@@ -437,12 +424,10 @@ fn transpile_file(
         );
     }
 
-    // Reading file
     let spinner = create_spinner("Reading source file...", quiet);
     let source = fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))?;
     spinner.finish_and_clear();
 
-    // Parsing
     let spinner = create_spinner("Parsing...", quiet);
     let mut parser = FlowParser::new(&source);
     let program = match parser.parse() {
@@ -463,7 +448,6 @@ fn transpile_file(
         println!("  {} Parsed successfully", "✓".green().bold());
     }
 
-    // Transpiling
     let spinner = create_spinner(
         &format!("Transpiling to {}...", target.to_uppercase()),
         quiet,
@@ -490,27 +474,22 @@ fn transpile_file(
         }
         "python" | "py" => {
             spinner.finish_and_clear();
-            // @TODO: Implement Python transpiler backend
             return Err("Python transpiler not yet implemented. Coming soon!".to_string());
         }
         "javascript" | "js" => {
             spinner.finish_and_clear();
-            // @TODO: Implement JavaScript transpiler backend
             return Err("JavaScript transpiler not yet implemented. Coming soon!".to_string());
         }
         "c" => {
             spinner.finish_and_clear();
-            // @TODO: Implement C transpiler backend
             return Err("C transpiler not yet implemented. Coming soon!".to_string());
         }
         "rust" => {
             spinner.finish_and_clear();
-            // @TODO: Implement Rust transpiler backend
             return Err("Rust transpiler not yet implemented. Coming soon!".to_string());
         }
         "wasm" | "webassembly" => {
             spinner.finish_and_clear();
-            // @TODO: Implement WebAssembly transpiler backend
             return Err("WebAssembly transpiler not yet implemented. Coming soon!".to_string());
         }
         _ => {
@@ -528,7 +507,6 @@ fn transpile_file(
         println!("  {} Transpiled successfully", "✓".green().bold());
     }
 
-    // Writing output
     let output_path = output.unwrap_or_else(|| {
         let base = path.file_stem().unwrap().to_string_lossy();
         let extension = match target.to_lowercase().as_str() {
@@ -653,7 +631,6 @@ fn start_repl(show_ast: bool, _verbose: bool, quiet: bool) -> Result<(), String>
             continue;
         }
 
-        // Wrap in a main function for execution
         let wrapped = format!("fn main() -> Int {{ {} }}", input);
 
         let mut parser = FlowParser::new(&wrapped);
@@ -664,7 +641,6 @@ fn start_repl(show_ast: bool, _verbose: bool, quiet: bool) -> Result<(), String>
                     println!("{:#?}", program);
                 }
 
-                // Create a simple compiler for the REPL
                 let compiler = FlowCompilerBuilder::new()
                     .target(CompilationTarget::Jit)
                     .optimization_level(0)
@@ -819,7 +795,6 @@ fn analysis_errors_to_rich(
             let mut suggestions = Vec::new();
             let mut notes = Vec::new();
 
-            // Add specific suggestions based on the error message
             if error.message.contains("Undefined function") {
                 if let Some(func_name) = extract_function_name(&error.message) {
                     suggestions.push(Suggestion {

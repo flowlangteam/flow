@@ -1,14 +1,14 @@
 // Function with parameters
 func add(x: i64, y: i64) -> i64 {
-    x + y
+    return x + y;
 }
 
 func multiply(x: i64, y: i64) -> i64 {
-    x * y
+    return x * y;
 }
 
 func main() -> i64 {
     let a = add(5, 3);
     let b = multiply(a, 2);
-    b
+    return b;
 }

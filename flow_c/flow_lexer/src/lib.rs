@@ -5,7 +5,6 @@ use logos::Logos;
 #[logos(skip r"//[^\n]*")]
 #[logos(skip r"/\*([^*]|\*[^/])*\*/")]
 pub enum Token {
-    // Keywords
     #[token("func")]
     Func,
     #[token("lambda")]
@@ -63,7 +62,6 @@ pub enum Token {
     #[token("unsafe")]
     Unsafe,
 
-    // Type keywords
     #[token("i8")]
     I8,
     #[token("i16")]
@@ -95,7 +93,6 @@ pub enum Token {
     #[token("str")]
     StrType,
 
-    // Operators
     #[token("+")]
     Plus,
     #[token("-")]
@@ -145,7 +142,6 @@ pub enum Token {
     #[token("#")]
     Hash,
 
-    // Delimiters
     #[token("(")]
     LParen,
     #[token(")")]
@@ -171,7 +167,6 @@ pub enum Token {
     #[token("&")]
     Ampersand,
 
-    // Literals
     #[regex(r"[a-zA-Z_][a-zA-Z0-9_]*", |lex| lex.slice().to_string())]
     Ident(String),
 

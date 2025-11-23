@@ -31,10 +31,7 @@ impl FlowCompiler for JavaTranspilerWrapper {
         program: &Program,
         config: &CompilerConfig,
     ) -> Result<CompilerOutput> {
-        // Apply configuration to the transpiler
-        if config.debug_info {
-            // TODO: Enable debug information in Java bytecode
-        }
+        if config.debug_info {}
 
         match self.transpiler.transpile(program) {
             Ok(bytecode) => Ok(CompilerOutput::Code(bytecode)),
@@ -50,19 +47,14 @@ impl FlowCompiler for JavaTranspilerWrapper {
         program: &Program,
         config: &CompilerConfig,
     ) -> Result<CompiledModule> {
-        // Apply configuration
-        if config.debug_info {
-            // TODO: Enable debug information in Java bytecode
-        }
+        if config.debug_info {}
 
         match self.transpiler.transpile(program) {
             Ok(bytecode) => {
-                // Extract module information from the compiled program
                 let mut functions = HashMap::new();
                 let mut types = HashMap::new();
                 let mut dependencies = Vec::new();
 
-                // Collect function information
                 for item in &program.items {
                     match item {
                         flow_ast::Item::Function(func) => {
@@ -72,14 +64,7 @@ impl FlowCompiler for JavaTranspilerWrapper {
                                 calling_convention: CallingConvention::System,
                             };
 
-                            // Java methods are mangled according to JVM rules
-                            let mangled_name = format!(
-                                "{}({}){}",
-                                func.name,
-                                // TODO: Convert Flow types to JVM type descriptors
-                                "",  // Parameters descriptor
-                                "V"  // Return type descriptor (void for now)
-                            );
+                            let mangled_name = format!("{}({}){}", func.name, "", "V");
 
                             let function_info = FunctionInfo {
                                 name: func.name.clone(),
@@ -95,11 +80,10 @@ impl FlowCompiler for JavaTranspilerWrapper {
                             functions.insert(func.name.clone(), function_info);
                         }
                         flow_ast::Item::Struct(struct_def) => {
-                            // Java structs become classes
                             let type_info = TypeInfo {
                                 name: struct_def.name.clone(),
-                                size: 0, // Java objects are managed by GC, size not directly relevant
-                                alignment: 8, // Standard object alignment
+                                size: 0,
+                                alignment: 8,
                                 is_public: struct_def.is_pub,
                             };
 
@@ -141,16 +125,12 @@ impl FlowCompiler for JavaTranspilerWrapper {
         modules: &[CompiledModule],
         _config: &CompilerConfig,
     ) -> Result<CompilerOutput> {
-        // Java bytecode linking is handled by the JVM at runtime
-        // For now, we'll create a JAR-like structure with multiple class files
-
         if modules.is_empty() {
             return Err(CompilerError::TranspileError(
                 "No modules to link".to_string(),
             ));
         }
 
-        // Verify all modules are for Java bytecode
         for module in modules {
             if module.target != CompilationTarget::JavaBytecode {
                 return Err(CompilerError::TranspileError(format!(
@@ -160,8 +140,6 @@ impl FlowCompiler for JavaTranspilerWrapper {
             }
         }
 
-        // For now, just concatenate all bytecode
-        // TODO: Implement proper JAR file generation or multi-class output
         let mut combined_data = Vec::new();
         for module in modules {
             combined_data.extend_from_slice(&module.data);
@@ -177,7 +155,7 @@ impl FlowCompiler for JavaTranspilerWrapper {
     fn supported_features(&self) -> Vec<String> {
         vec![
             "functions".to_string(),
-            "structs".to_string(), // As classes
+            "structs".to_string(),
             "conditionals".to_string(),
             "loops".to_string(),
             "arithmetic".to_string(),
@@ -188,9 +166,6 @@ impl FlowCompiler for JavaTranspilerWrapper {
     }
 
     fn validate_program(&self, program: &Program) -> Result<()> {
-        // Quick validation for Java bytecode generation
-
-        // Check for main function (required for executable Java programs)
         let has_main = program.items.iter().any(|item| {
             if let flow_ast::Item::Function(func) = item {
                 func.name == "main"
@@ -204,12 +179,6 @@ impl FlowCompiler for JavaTranspilerWrapper {
                 "No main function found for Java program".to_string(),
             ));
         }
-
-        // TODO: Add Java-specific validation:
-        // - Check for Java-incompatible features
-        // - Validate class structure
-        // - Check method signatures
-        // - Validate field access patterns
 
         Ok(())
     }

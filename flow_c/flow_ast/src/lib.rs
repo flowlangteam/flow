@@ -107,31 +107,26 @@ pub struct AttributeApplication {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
-    // Signed integers
     I8,
     I16,
     I32,
     I64,
     I128,
 
-    // Unsigned integers
     U8,
     U16,
     U32,
     U64,
     U128,
 
-    // Floating point
     F32,
     F64,
 
-    // Other primitives
     Bool,
     Char,
     String,
     Unit,
 
-    // Composite types
     Named(String),
     Function(Vec<Type>, Box<Type>),
     Pointer(Box<Type>),
@@ -139,8 +134,6 @@ pub enum Type {
     Array(Box<Type>, usize),
     Slice(Box<Type>),
 
-    // @TODO: Implement full generics support with type variables and constraints
-    // Type variables for generics (TODO)
     TypeVar(String),
 }
 
@@ -153,42 +146,35 @@ pub struct TypedBinding {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
-    // Literals
     Integer(i64),
     Float(f64),
     String(String),
     Bool(bool),
     Unit,
 
-    // Variables
     Ident(String),
 
-    // Binary operations
     Binary {
         op: BinOp,
         left: Box<Expr>,
         right: Box<Expr>,
     },
 
-    // Unary operations
     Unary {
         op: UnOp,
         expr: Box<Expr>,
     },
 
-    // Function call
     Call {
         func: Box<Expr>,
         args: Vec<Expr>,
     },
 
-    // Lambda
     Lambda {
         params: Vec<Param>,
         body: Box<Expr>,
     },
 
-    // Let binding
     Let {
         name: String,
         mutable: bool,
@@ -197,60 +183,50 @@ pub enum Expr {
         then: Box<Expr>,
     },
 
-    // Assignment to an existing binding
     Assign {
         target: Box<Expr>,
         value: Box<Expr>,
     },
 
-    // If expression
     If {
         cond: Box<Expr>,
         then: Box<Expr>,
         else_: Option<Box<Expr>>,
     },
 
-    // Match expression
     Match {
         expr: Box<Expr>,
         arms: Vec<MatchArm>,
     },
 
-    // Block
     Block(Vec<Expr>),
 
-    // Field access
     Field {
         expr: Box<Expr>,
         field: String,
     },
 
-    // Method call
     Method {
         expr: Box<Expr>,
         method: String,
         args: Vec<Expr>,
     },
 
-    // Struct instantiation
     StructInit {
         name: String,
         fields: HashMap<String, Expr>,
     },
 
-    // Pipe operator
     Pipe {
         left: Box<Expr>,
         right: Box<Expr>,
     },
 
-    // Return
     Return(Option<Box<Expr>>),
 
-    // Memory operations
     Alloc {
         ty: Type,
-        count: Option<Box<Expr>>, // None for single allocation, Some for array
+        count: Option<Box<Expr>>,
     },
     Free {
         ptr: Box<Expr>,
@@ -262,18 +238,14 @@ pub enum Expr {
         expr: Box<Expr>,
     },
 
-    // Memory scope with automatic deallocation
     TempScope {
         body: Box<Expr>,
     },
 
-    // Unsafe block for explicit memory operations
     Unsafe {
         body: Box<Expr>,
     },
 }
-
-// Warnings and linting information
 #[derive(Debug, Clone, PartialEq)]
 pub enum Warning {
     UnusedVariable { name: String, span: Span },

@@ -1,8 +1,7 @@
-// FFI example - calling C functions
 extern "C" {
-    fn abs(Int) -> Int;
+    func abs(i64) -> i64;
 }
 
-fn main() -> Int {
-    abs(-42)
+func main() -> i64 {
+    abs(-42);
 }

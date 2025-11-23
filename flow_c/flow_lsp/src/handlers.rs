@@ -70,7 +70,7 @@ impl Handlers {
         // Get the word at the position
         let word = document.word_at_position(&position)?;
 
-        let mut analyzer = self.analyzer_bridge.write().await;
+        let analyzer = self.analyzer_bridge.write().await;
         let hover_info = analyzer.get_hover_info(&text, position, &word)?;
 
         // Create a simple hover response with code formatting
@@ -78,7 +78,7 @@ impl Handlers {
             tower_lsp::lsp_types::LanguageString {
                 language: "flow".to_string(),
                 value: hover_info,
-            }
+            },
         ));
 
         Some(Hover {

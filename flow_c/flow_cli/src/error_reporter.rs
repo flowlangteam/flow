@@ -87,7 +87,6 @@ impl ErrorReporter {
             }
         }
 
-        // Suggestions
         for suggestion in &error.suggestions {
             output.push_str(&format!(
                 "{}: {}\n",
@@ -104,7 +103,6 @@ impl ErrorReporter {
             }
         }
 
-        // Notes
         for note in &error.notes {
             output.push_str(&format!("{}: {}\n", "note".blue().bold(), note));
         }
@@ -122,7 +120,6 @@ impl ErrorReporter {
 
         let mut output = String::new();
 
-        // File location
         output.push_str(&format!(
             "  {} {}:{}:{}\n",
             "-->".blue().bold(),
@@ -131,14 +128,11 @@ impl ErrorReporter {
             col_start + 1
         ));
 
-        // Line number padding
         let line_num_width = line_num.to_string().len();
         let padding = " ".repeat(line_num_width);
 
-        // Empty line before source
         output.push_str(&format!("   {}{}\n", padding, "|".blue().bold()));
 
-        // Source line
         output.push_str(&format!(
             "{} {} {}\n",
             format!("{:width$}", line_num, width = line_num_width)
@@ -148,7 +142,6 @@ impl ErrorReporter {
             line_content
         ));
 
-        // Error indicator
         let indicator_padding = " ".repeat(col_start);
         let indicator_length = if col_end > col_start {
             col_end - col_start
@@ -170,7 +163,6 @@ impl ErrorReporter {
             indicator
         ));
 
-        // Label
         if let Some(label) = &span.label {
             output.push_str(&format!(
                 "   {}{}{}{}\n",
@@ -194,11 +186,9 @@ impl ErrorReporter {
 
         let mut output = String::new();
 
-        // Line number padding
         let line_num_width = line_num.to_string().len();
         let padding = " ".repeat(line_num_width);
 
-        // Show the line with suggested replacement
         let before = &line_content[..col_start];
         let after = &line_content[col_end..];
         let suggested_line = format!("{}{}{}", before, replacement_text, after);
@@ -212,7 +202,6 @@ impl ErrorReporter {
             suggested_line
         ));
 
-        // Highlight the replacement
         let indicator_padding = " ".repeat(col_start);
         let indicator_length = replacement_text.len();
         let indicator = "~".repeat(indicator_length).green().bold();
@@ -252,7 +241,7 @@ impl ErrorReporter {
                 return Some((line_idx + 1, col_start, col_end, line.to_string()));
             }
 
-            char_pos = line_end + 1; // +1 for newline
+            char_pos = line_end + 1;
         }
 
         None

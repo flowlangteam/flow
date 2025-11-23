@@ -22,6 +22,7 @@ anyhow = "1.0"
 thiserror = "1.0"
 byteorder = "1.5"
 zip = { version = "0.6", default-features = false, features = ["deflate"] }
+ristretto_classfile = "0.26"
 
 [dev-dependencies]
 flow_parser = { path = "../../flow_parser" }

@@ -28,7 +28,6 @@ impl FlowCompiler for JitCompilerWrapper {
 
         match self.compiler.compile(program) {
             Ok(func_ptr) => {
-                // Box the function pointer for type erasure
                 let boxed_ptr = Box::new(func_ptr) as Box<dyn std::any::Any>;
                 Ok(CompilerOutput::Jit(boxed_ptr))
             }
@@ -45,7 +44,6 @@ impl FlowCompiler for JitCompilerWrapper {
 
         match self.compiler.compile_module(program) {
             Ok(()) => {
-                // Extract module information from the module registry
                 let namespace = program
                     .namespace
                     .as_ref()
@@ -56,11 +54,9 @@ impl FlowCompiler for JitCompilerWrapper {
                 let mut types = HashMap::new();
                 let mut dependencies = Vec::new();
 
-                // Get the module that was just registered
                 if let Some(external_module) =
                     self.compiler.get_module_registry().get_module(&namespace)
                 {
-                    // Convert ExternalFunction to FunctionInfo
                     for external_func in &external_module.functions {
                         let signature = FunctionSignature {
                             params: external_func.params.clone(),
@@ -72,7 +68,7 @@ impl FlowCompiler for JitCompilerWrapper {
                             name: external_func.name.clone(),
                             mangled_name: external_func.mangled_name.clone(),
                             signature,
-                            is_public: true, // Only public functions are in the registry
+                            is_public: true,
                             namespace: external_func.namespace.clone(),
                         };
 
@@ -80,7 +76,6 @@ impl FlowCompiler for JitCompilerWrapper {
                     }
                 }
 
-                // Extract type information from the AST (since types aren't in module registry yet)
                 for item in &program.items {
                     match item {
                         flow_ast::Item::Struct(struct_def) => {
@@ -121,7 +116,7 @@ impl FlowCompiler for JitCompilerWrapper {
                     types,
                     dependencies,
                     target: CompilationTarget::Jit,
-                    data: Vec::new(), // JIT doesn't produce binary data
+                    data: Vec::new(),
                     entry_symbol: None,
                 })
             }
@@ -134,8 +129,6 @@ impl FlowCompiler for JitCompilerWrapper {
         _modules: &[CompiledModule],
         _config: &CompilerConfig,
     ) -> Result<CompilerOutput> {
-        // JIT compilation doesn't support traditional linking - modules are compiled together
-        // For now, return an error indicating this isn't supported
         Err(CompilerError::JitError(
             "Module linking not supported for JIT compilation - compile modules together instead"
                 .to_string(),
@@ -154,14 +147,12 @@ impl FlowCompiler for JitCompilerWrapper {
             "loops".to_string(),
             "arithmetic".to_string(),
             "memory_management".to_string(),
-            "pattern_matching".to_string(), // Partial support
-            "lambdas".to_string(),          // Partial support
+            "pattern_matching".to_string(),
+            "lambdas".to_string(),
         ]
     }
 
     fn validate_program(&self, program: &Program) -> Result<()> {
-        // Quick validation without full compilation
-        // Check for main function if this is supposed to be an executable
         let has_main = program.items.iter().any(|item| {
             if let flow_ast::Item::Function(func) = item {
                 func.name == "main"
@@ -175,11 +166,6 @@ impl FlowCompiler for JitCompilerWrapper {
                 "No main function found".to_string(),
             ));
         }
-
-        // TODO: Add more validation checks:
-        // - Type checking
-        // - Name resolution
-        // - Control flow analysis
 
         Ok(())
     }

@@ -1,0 +1,13 @@
+// Simple extern block test
+
+extern "C" {
+    func abs(i64) -> i64;
+}
+
+func test() -> i64 {
+    return abs(-42);
+}
+
+func main() -> i64 {
+    return test();
+}

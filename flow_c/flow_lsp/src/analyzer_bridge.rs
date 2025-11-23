@@ -1,335 +1,649 @@
-use flow_analyzer::{AnalysisError, Analyzer, Severity as AnalysisSeverity};
-use flow_ast::{Program, Span, Warning};
+use flow_ast::*;
 use flow_parser::Parser;
+use flow_transpiler::{SymbolCollector, TranspileContext, TypeInferencer};
 use std::collections::HashMap;
-use tower_lsp::lsp_types::{Diagnostic, DiagnosticSeverity, Position, Range, Url};
+use tower_lsp::lsp_types::{
+    CompletionItem, CompletionItemKind, Diagnostic, DiagnosticSeverity, Position, Range,
+};
 
-/// Bridge between Flow analyzer and LSP diagnostics
+/// Bridge between the analyzer and LSP
 pub struct AnalyzerBridge {
-    // Analyzer is stateless, create fresh for each analysis
+    /// Cached parse results
+    _ast_cache: HashMap<String, Program>,
+    /// Symbol context cache
+    _context_cache: HashMap<String, TranspileContext>,
 }
 
 impl AnalyzerBridge {
     pub fn new() -> Self {
-        Self {}
+        Self {
+            _ast_cache: HashMap::new(),
+            _context_cache: HashMap::new(),
+        }
     }
 
-    /// Analyze a document and return LSP diagnostics
-    pub fn analyze_document(&mut self, _uri: &Url, text: &str) -> Vec<Diagnostic> {
+    /// Analyze a document and return diagnostics
+    pub fn analyze_document(
+        &mut self,
+        _uri: &tower_lsp::lsp_types::Url,
+        text: &str,
+    ) -> Vec<Diagnostic> {
         let mut diagnostics = Vec::new();
-
-        // Create a fresh analyzer to avoid state accumulation
-        let mut analyzer = Analyzer::new();
 
         // Parse the document
         let mut parser = Parser::new(text);
         match parser.parse() {
             Ok(program) => {
-                // Analyze the parsed program
-                match analyzer.analyze(&program) {
-                    Ok(()) => {
-                        // No errors, but check for warnings
-                        for warning in analyzer.get_warnings() {
-                            if let Some(diagnostic) = self.warning_to_diagnostic(warning, text) {
-                                diagnostics.push(diagnostic);
-                            }
-                        }
-                    }
-                    Err(errors) => {
-                        // Convert analysis errors to diagnostics
-                        for error in errors {
-                            if let Some(diagnostic) = self.error_to_diagnostic(&error, text) {
-                                diagnostics.push(diagnostic);
-                            }
-                        }
-                    }
-                }
-            }
-            Err(diagnostic) => {
-                let span = diagnostic
-                    .labels
-                    .iter()
-                    .find(|label| matches!(label.style, flow_ast::LabelStyle::Primary))
-                    .map(|label| label.span.clone())
-                    .unwrap_or_else(|| Span::new(0, 0));
+                // Collect symbols and check for errors
+                let mut collector = SymbolCollector::new();
+                collector.collect(&program);
+                let context = collector.into_context();
 
-                // Convert parse error to diagnostic
-                let diagnostic = Diagnostic {
-                    range: span_to_range(&span, text),
+                // Check for semantic errors
+                self.validate_program(&program, &context, &mut diagnostics);
+            }
+            Err(err) => {
+                // Parser error
+                diagnostics.push(Diagnostic {
+                    range: Range {
+                        start: Position {
+                            line: 0,
+                            character: 0,
+                        },
+                        end: Position {
+                            line: 0,
+                            character: 0,
+                        },
+                    },
                     severity: Some(DiagnosticSeverity::ERROR),
-                    code: None,
-                    code_description: None,
-                    source: Some("flow-parser".to_string()),
-                    message: diagnostic.message,
-                    related_information: None,
-                    tags: None,
-                    data: None,
-                };
-                diagnostics.push(diagnostic);
+                    code: Some(tower_lsp::lsp_types::NumberOrString::String(
+                        "E0001".to_string(),
+                    )),
+                    message: format!("Parse error: {:?}", err),
+                    source: Some("flow".to_string()),
+                    ..Default::default()
+                });
             }
         }
 
         diagnostics
     }
 
-    /// Get completion suggestions for a position in the document
-    pub fn get_completions(&mut self, text: &str, _position: Position) -> Vec<CompletionItem> {
-        let mut completions = Vec::new();
+    /// Validate the program for semantic errors
+    fn validate_program(
+        &self,
+        program: &Program,
+        context: &TranspileContext,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) {
+        // Check for duplicate definitions
+        self.check_duplicates(program, diagnostics);
 
-        // Create a fresh analyzer
-        let mut analyzer = Analyzer::new();
-
-        // Parse the document to get context
-        let mut parser = Parser::new(text);
-        if let Ok(program) = parser.parse() {
-            // Analyze to get scope information
-            if analyzer.analyze(&program).is_ok() {
-                // Add keyword completions
-                completions.extend(self.get_keyword_completions());
-
-                // Add function completions
-                completions.extend(self.get_function_completions(&program));
-
-                // Add type completions
-                completions.extend(self.get_type_completions(&program));
+        // Validate functions
+        for item in &program.items {
+            match item {
+                Item::Function(func) => {
+                    self.validate_function(func, context, diagnostics);
+                }
+                Item::Struct(struct_def) => {
+                    self.validate_struct(struct_def, diagnostics);
+                }
+                Item::Impl(impl_block) => {
+                    self.validate_impl(impl_block, context, diagnostics);
+                }
+                Item::ExternBlock(block) => {
+                    self.validate_extern_block(block, diagnostics);
+                }
+                _ => {}
             }
         }
-
-        completions
     }
 
-    /// Get hover information for a position
-    pub fn get_hover_info(&mut self, text: &str, _position: Position, word: &str) -> Option<String> {
-        // Create a fresh analyzer
-        let mut analyzer = Analyzer::new();
-        
-        let mut parser = Parser::new(text);
-        if let Ok(program) = parser.parse() {
-            if analyzer.analyze(&program).is_ok() {
-                // Look up the symbol in the analyzer's scope
-                return analyzer.lookup_symbol(word);
+    /// Check for duplicate definitions
+    fn check_duplicates(&self, program: &Program, diagnostics: &mut Vec<Diagnostic>) {
+        let mut function_names = HashMap::new();
+        let mut struct_names = HashMap::new();
+
+        for item in &program.items {
+            match item {
+                Item::Function(func) => {
+                    if let Some(prev_span) = function_names.insert(&func.name, func.span.clone()) {
+                        diagnostics.push(self.create_diagnostic(
+                            DiagnosticSeverity::ERROR,
+                            func.span.clone(),
+                            "E0008",
+                            format!("Duplicate function definition: '{}'", func.name),
+                        ));
+                        diagnostics.push(self.create_diagnostic(
+                            DiagnosticSeverity::HINT,
+                            prev_span,
+                            "E0008",
+                            "Previous definition here".to_string(),
+                        ));
+                    }
+                }
+                Item::Struct(struct_def) => {
+                    if struct_names.contains_key(&struct_def.name) {
+                        diagnostics.push(self.create_diagnostic(
+                            DiagnosticSeverity::ERROR,
+                            Span::new(0, 0),
+                            "E0008",
+                            format!("Duplicate struct definition: '{}'", struct_def.name),
+                        ));
+                    }
+                    struct_names.insert(&struct_def.name, ());
+                }
+                _ => {}
             }
         }
+    }
+
+    /// Validate a function
+    fn validate_function(
+        &self,
+        func: &Function,
+        context: &TranspileContext,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) {
+        // Validate the function body
+        let mut locals = HashMap::new();
+        for param in &func.params {
+            locals.insert(param.name.clone(), param.ty.clone());
+        }
+
+        self.validate_expr(&func.body, context, &locals, diagnostics);
+
+        // Check return type matches
+        if let Some(expected_return) = &func.return_type {
+            let inferencer = TypeInferencer::new(context);
+            if let Some(actual_return) = inferencer.infer_expr(&func.body, &locals) {
+                if expected_return != &actual_return && actual_return != Type::Unit {
+                    diagnostics.push(self.create_diagnostic(
+                        DiagnosticSeverity::ERROR,
+                        func.span.clone(),
+                        "E0014",
+                        format!(
+                            "Function '{}' expected to return {:?}, but returns {:?}",
+                            func.name, expected_return, actual_return
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+
+    /// Validate a struct
+    fn validate_struct(&self, struct_def: &Struct, diagnostics: &mut Vec<Diagnostic>) {
+        let mut field_names = HashMap::new();
+
+        for field in &struct_def.fields {
+            if field_names.contains_key(&field.name) {
+                diagnostics.push(self.create_diagnostic(
+                    DiagnosticSeverity::ERROR,
+                    Span::new(0, 0),
+                    "E0008",
+                    format!(
+                        "Duplicate field '{}' in struct '{}'",
+                        field.name, struct_def.name
+                    ),
+                ));
+            }
+            field_names.insert(&field.name, ());
+        }
+    }
+
+    /// Validate an impl block
+    fn validate_impl(
+        &self,
+        impl_block: &Impl,
+        context: &TranspileContext,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) {
+        // Check that the struct exists
+        if context.get_struct(&impl_block.struct_name).is_none() {
+            diagnostics.push(self.create_diagnostic(
+                DiagnosticSeverity::ERROR,
+                Span::new(0, 0),
+                "E0005",
+                format!("Struct '{}' not found", impl_block.struct_name),
+            ));
+            return;
+        }
+
+        // Validate each method
+        for method in &impl_block.methods {
+            self.validate_function(method, context, diagnostics);
+        }
+    }
+
+    /// Validate an extern block
+    fn validate_extern_block(&self, block: &ExternBlock, diagnostics: &mut Vec<Diagnostic>) {
+        // Validate the language specifier
+        let supported_langs = ["C", "Java", "Python", "JavaScript"];
+        if !supported_langs.contains(&block.lang.as_str()) {
+            diagnostics.push(self.create_diagnostic(
+                DiagnosticSeverity::WARNING,
+                Span::new(0, 0),
+                "W0007",
+                format!(
+                    "Unsupported extern language: '{}'. Supported: {:?}",
+                    block.lang, supported_langs
+                ),
+            ));
+        }
+
+        // Check for duplicate extern function names
+        let mut extern_names = HashMap::new();
+        for item in &block.items {
+            if extern_names.contains_key(&item.name) {
+                diagnostics.push(self.create_diagnostic(
+                    DiagnosticSeverity::ERROR,
+                    Span::new(0, 0),
+                    "E0008",
+                    format!("Duplicate extern function: '{}'", item.name),
+                ));
+            }
+            extern_names.insert(&item.name, ());
+        }
+    }
+
+    /// Validate an expression
+    fn validate_expr(
+        &self,
+        expr: &Expr,
+        context: &TranspileContext,
+        locals: &HashMap<String, Type>,
+        diagnostics: &mut Vec<Diagnostic>,
+    ) {
+        match expr {
+            Expr::Ident(name) => {
+                // Check if variable is defined
+                if !locals.contains_key(name)
+                    && context.get_function(name).is_none()
+                    && context.get_extern_function(name).is_none()
+                {
+                    diagnostics.push(self.create_diagnostic(
+                        DiagnosticSeverity::ERROR,
+                        Span::new(0, 0),
+                        "E0003",
+                        format!("Undefined variable or function: '{}'", name),
+                    ));
+                }
+            }
+            Expr::Call { func, args } => {
+                // Validate function exists
+                if let Expr::Ident(func_name) = func.as_ref() {
+                    if let Some(signature) = context.get_function(func_name) {
+                        // Check argument count
+                        if args.len() != signature.params.len() {
+                            diagnostics.push(self.create_diagnostic(
+                                DiagnosticSeverity::ERROR,
+                                Span::new(0, 0),
+                                "E0006",
+                                format!(
+                                    "Function '{}' expects {} arguments, but {} were provided",
+                                    func_name,
+                                    signature.params.len(),
+                                    args.len()
+                                ),
+                            ));
+                        }
+                    } else if let Some(extern_info) = context.get_extern_function(func_name) {
+                        // Check argument count for extern functions
+                        if args.len() != extern_info.params.len() {
+                            diagnostics.push(self.create_diagnostic(
+                                DiagnosticSeverity::ERROR,
+                                Span::new(0, 0),
+                                "E0006",
+                                format!(
+                                    "Extern function '{}' expects {} arguments, but {} were provided",
+                                    func_name,
+                                    extern_info.params.len(),
+                                    args.len()
+                                ),
+                            ));
+                        }
+                    } else {
+                        diagnostics.push(self.create_diagnostic(
+                            DiagnosticSeverity::ERROR,
+                            Span::new(0, 0),
+                            "E0004",
+                            format!("Function '{}' not found", func_name),
+                        ));
+                    }
+                }
+
+                // Validate arguments
+                for arg in args {
+                    self.validate_expr(arg, context, locals, diagnostics);
+                }
+            }
+            Expr::Field { expr, field } => {
+                self.validate_expr(expr, context, locals, diagnostics);
+
+                // Check if field exists on struct
+                let inferencer = TypeInferencer::new(context);
+                if let Some(ty) = inferencer.infer_expr(expr, locals) {
+                    if let Type::Named(struct_name) = ty {
+                        if let Some(struct_info) = context.get_struct(&struct_name) {
+                            let field_exists =
+                                struct_info.fields.iter().any(|(name, _, _)| name == field);
+                            if !field_exists {
+                                diagnostics.push(self.create_diagnostic(
+                                    DiagnosticSeverity::ERROR,
+                                    Span::new(0, 0),
+                                    "E0011",
+                                    format!(
+                                        "Field '{}' not found on struct '{}'",
+                                        field, struct_name
+                                    ),
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+            Expr::Method { expr, method, args } => {
+                self.validate_expr(expr, context, locals, diagnostics);
+
+                // Check if method exists on struct
+                let inferencer = TypeInferencer::new(context);
+                if let Some(ty) = inferencer.infer_expr(expr, locals) {
+                    if let Type::Named(struct_name) = ty {
+                        if context.get_method(&struct_name, method).is_none() {
+                            diagnostics.push(self.create_diagnostic(
+                                DiagnosticSeverity::ERROR,
+                                Span::new(0, 0),
+                                "E0004",
+                                format!(
+                                    "Method '{}' not found on struct '{}'",
+                                    method, struct_name
+                                ),
+                            ));
+                        }
+                    }
+                }
+
+                // Validate arguments
+                for arg in args {
+                    self.validate_expr(arg, context, locals, diagnostics);
+                }
+            }
+            Expr::StructInit { name, fields } => {
+                // Check if struct exists
+                if let Some(struct_info) = context.get_struct(name) {
+                    // Check that all required fields are initialized
+                    for (field_name, _, _) in &struct_info.fields {
+                        if !fields.contains_key(field_name) {
+                            diagnostics.push(self.create_diagnostic(
+                                DiagnosticSeverity::ERROR,
+                                Span::new(0, 0),
+                                "E0012",
+                                format!(
+                                    "Missing field '{}' in struct '{}' initialization",
+                                    field_name, name
+                                ),
+                            ));
+                        }
+                    }
+
+                    // Check for unknown fields
+                    for field_name in fields.keys() {
+                        let field_exists = struct_info
+                            .fields
+                            .iter()
+                            .any(|(fname, _, _)| fname == field_name);
+                        if !field_exists {
+                            diagnostics.push(self.create_diagnostic(
+                                DiagnosticSeverity::ERROR,
+                                Span::new(0, 0),
+                                "E0011",
+                                format!("Unknown field '{}' in struct '{}'", field_name, name),
+                            ));
+                        }
+                    }
+
+                    // Validate field expressions
+                    for expr_val in fields.values() {
+                        self.validate_expr(expr_val, context, locals, diagnostics);
+                    }
+                } else {
+                    diagnostics.push(self.create_diagnostic(
+                        DiagnosticSeverity::ERROR,
+                        Span::new(0, 0),
+                        "E0005",
+                        format!("Struct '{}' not found", name),
+                    ));
+                }
+            }
+            Expr::Let { value, then, .. } => {
+                self.validate_expr(value, context, locals, diagnostics);
+                self.validate_expr(then, context, locals, diagnostics);
+            }
+            Expr::Binary { left, right, .. } => {
+                self.validate_expr(left, context, locals, diagnostics);
+                self.validate_expr(right, context, locals, diagnostics);
+            }
+            Expr::Unary { expr: inner, .. } => {
+                self.validate_expr(inner, context, locals, diagnostics);
+            }
+            Expr::If { cond, then, else_ } => {
+                self.validate_expr(cond, context, locals, diagnostics);
+                self.validate_expr(then, context, locals, diagnostics);
+                if let Some(else_expr) = else_ {
+                    self.validate_expr(else_expr, context, locals, diagnostics);
+                }
+            }
+            Expr::Block(exprs) => {
+                for expr in exprs {
+                    self.validate_expr(expr, context, locals, diagnostics);
+                }
+            }
+            Expr::Match {
+                expr: match_expr,
+                arms,
+            } => {
+                self.validate_expr(match_expr, context, locals, diagnostics);
+                for arm in arms {
+                    self.validate_expr(&arm.body, context, locals, diagnostics);
+                }
+            }
+            Expr::Pipe { left, right } => {
+                self.validate_expr(left, context, locals, diagnostics);
+                self.validate_expr(right, context, locals, diagnostics);
+            }
+            Expr::Lambda { body, .. } => {
+                self.validate_expr(body, context, locals, diagnostics);
+            }
+            Expr::Return(expr_opt) => {
+                if let Some(inner_expr) = expr_opt {
+                    self.validate_expr(inner_expr, context, locals, diagnostics);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Get completion items for a position
+    pub fn get_completions(&self, text: &str, _position: Position) -> Vec<CompletionItem> {
+        let mut items = Vec::new();
+
+        // Parse to get context
+        let mut parser = Parser::new(text);
+        if let Ok(program) = parser.parse() {
+            let mut collector = SymbolCollector::new();
+            collector.collect(&program);
+            let context = collector.into_context();
+
+            // Add functions
+            for (name, sig) in &context.functions {
+                items.push(CompletionItem {
+                    label: name.clone(),
+                    kind: Some(CompletionItemKind::FUNCTION),
+                    detail: Some(format!(
+                        "func {}({}) -> {:?}",
+                        name,
+                        sig.params
+                            .iter()
+                            .map(|(n, t)| format!("{}: {:?}", n, t))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        sig.return_type.as_ref().unwrap_or(&Type::Unit)
+                    )),
+                    ..Default::default()
+                });
+            }
+
+            // Add structs
+            for (name, _) in &context.structs {
+                items.push(CompletionItem {
+                    label: name.clone(),
+                    kind: Some(CompletionItemKind::STRUCT),
+                    detail: Some(format!("struct {}", name)),
+                    ..Default::default()
+                });
+            }
+
+            // Add extern functions
+            for (name, info) in &context.extern_functions {
+                items.push(CompletionItem {
+                    label: name.clone(),
+                    kind: Some(CompletionItemKind::FUNCTION),
+                    detail: Some(format!(
+                        "extern \"{}\" func {}({}) -> {:?}",
+                        info.lang,
+                        name,
+                        info.params
+                            .iter()
+                            .map(|t| format!("{:?}", t))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        info.return_type.as_ref().unwrap_or(&Type::Unit)
+                    )),
+                    ..Default::default()
+                });
+            }
+
+            // Add keywords
+            for keyword in &[
+                "func",
+                "struct",
+                "impl",
+                "extern",
+                "let",
+                "mut",
+                "if",
+                "else",
+                "match",
+                "return",
+                "pub",
+                "use",
+                "namespace",
+                "unsafe",
+                "true",
+                "false",
+            ] {
+                items.push(CompletionItem {
+                    label: keyword.to_string(),
+                    kind: Some(CompletionItemKind::KEYWORD),
+                    ..Default::default()
+                });
+            }
+        }
+
+        items
+    }
+
+    /// Get hover information for a symbol
+    pub fn get_hover_info(&self, text: &str, _position: Position, word: &str) -> Option<String> {
+        let mut parser = Parser::new(text);
+        if let Ok(program) = parser.parse() {
+            let mut collector = SymbolCollector::new();
+            collector.collect(&program);
+            let context = collector.into_context();
+
+            // Check if it's a function
+            if let Some(sig) = context.get_function(word) {
+                return Some(format!(
+                    "func {}({}) -> {:?}\n\n{}",
+                    word,
+                    sig.params
+                        .iter()
+                        .map(|(n, t)| format!("{}: {:?}", n, t))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    sig.return_type.as_ref().unwrap_or(&Type::Unit),
+                    if sig.is_pub { "public" } else { "private" }
+                ));
+            }
+
+            // Check if it's an extern function
+            if let Some(info) = context.get_extern_function(word) {
+                return Some(format!(
+                    "extern \"{}\" func {}({}) -> {:?}",
+                    info.lang,
+                    word,
+                    info.params
+                        .iter()
+                        .map(|t| format!("{:?}", t))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                    info.return_type.as_ref().unwrap_or(&Type::Unit)
+                ));
+            }
+
+            // Check if it's a struct
+            if let Some(struct_info) = context.get_struct(word) {
+                return Some(format!(
+                    "struct {} {{\n{}\n}}",
+                    word,
+                    struct_info
+                        .fields
+                        .iter()
+                        .map(|(n, t, p)| format!(
+                            "    {}{}: {:?}",
+                            if *p { "pub " } else { "" },
+                            n,
+                            t
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(",\n")
+                ));
+            }
+        }
+
         None
     }
 
-    /// Convert analysis error to LSP diagnostic
-    fn error_to_diagnostic(&self, error: &AnalysisError, text: &str) -> Option<Diagnostic> {
-        let severity = match error.severity {
-            AnalysisSeverity::Error => DiagnosticSeverity::ERROR,
-            AnalysisSeverity::Warning => DiagnosticSeverity::WARNING,
-            AnalysisSeverity::Info => DiagnosticSeverity::INFORMATION,
-            AnalysisSeverity::Hint => DiagnosticSeverity::HINT,
-        };
-
-        Some(Diagnostic {
-            range: span_to_range(&error.span, text),
+    /// Create a diagnostic
+    fn create_diagnostic(
+        &self,
+        severity: DiagnosticSeverity,
+        span: Span,
+        code: &str,
+        message: String,
+    ) -> Diagnostic {
+        Diagnostic {
+            range: Range {
+                start: Position {
+                    line: (span.start / 100) as u32,
+                    character: (span.start % 100) as u32,
+                },
+                end: Position {
+                    line: (span.end / 100) as u32,
+                    character: (span.end % 100) as u32,
+                },
+            },
             severity: Some(severity),
-            code: None,
-            code_description: None,
-            source: Some("flow-analyzer".to_string()),
-            message: error.message.clone(),
-            related_information: None,
-            tags: None,
-            data: None,
-        })
-    }
-
-    /// Convert warning to LSP diagnostic
-    fn warning_to_diagnostic(&self, warning: &Warning, text: &str) -> Option<Diagnostic> {
-        let (message, span) = match warning {
-            Warning::UnusedVariable { name, span } => (format!("Unused variable: {}", name), span),
-            Warning::UnusedFunction { name, span } => (format!("Unused function: {}", name), span),
-            Warning::DeadCode { span } => ("Dead code".to_string(), span),
-            Warning::UnnecessaryMut { name, span } => (
-                format!("Unnecessary mutable modifier for variable: {}", name),
-                span,
-            ),
-            Warning::PossibleMemoryLeak { span } => ("Possible memory leak".to_string(), span),
-            Warning::UnsafeOperation { description, span } => {
-                (format!("Unsafe operation: {}", description), span)
-            }
-            Warning::ImplicitConversion { from, to, span } => (
-                format!("Implicit conversion from {:?} to {:?}", from, to),
-                span,
-            ),
-            Warning::ShadowedVariable { name, span } => (
-                format!("Variable shadows previous declaration: {}", name),
-                span,
-            ),
-        };
-
-        Some(Diagnostic {
-            range: span_to_range(span, text),
-            severity: Some(DiagnosticSeverity::WARNING),
-            code: None,
-            code_description: None,
-            source: Some("flow-analyzer".to_string()),
+            code: Some(tower_lsp::lsp_types::NumberOrString::String(
+                code.to_string(),
+            )),
             message,
-            related_information: None,
-            tags: None,
-            data: None,
-        })
-    }
-
-    /// Get keyword completions
-    fn get_keyword_completions(&self) -> Vec<CompletionItem> {
-        use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind};
-
-        let keywords = [
-            "func",
-            "struct",
-            "impl",
-            "let",
-            "mut",
-            "if",
-            "else",
-            "match",
-            "return",
-            "true",
-            "false",
-            "pub",
-            "extern",
-            "import",
-            "use",
-            "namespace",
-            "lambda",
-            "temp",
-            "unsafe",
-            "alloc",
-            "free",
-        ];
-
-        keywords
-            .iter()
-            .map(|&keyword| CompletionItem {
-                label: keyword.to_string(),
-                kind: Some(CompletionItemKind::KEYWORD),
-                detail: Some(format!("Flow keyword: {}", keyword)),
-                ..Default::default()
-            })
-            .collect()
-    }
-
-    /// Get function completions from the program
-    fn get_function_completions(&self, program: &Program) -> Vec<CompletionItem> {
-        use flow_ast::Item;
-        use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind};
-
-        let mut completions = Vec::new();
-
-        for item in &program.items {
-            if let Item::Function(func) = item {
-                let params_str = func
-                    .params
-                    .iter()
-                    .map(|p| format!("{}: {:?}", p.name, p.ty))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-
-                let return_type_str = func
-                    .return_type
-                    .as_ref()
-                    .map(|t| format!(" -> {:?}", t))
-                    .unwrap_or_default();
-
-                completions.push(CompletionItem {
-                    label: func.name.clone(),
-                    kind: Some(CompletionItemKind::FUNCTION),
-                    detail: Some(format!(
-                        "func {}({}){}",
-                        func.name, params_str, return_type_str
-                    )),
-                    insert_text: Some(format!(
-                        "{}({})",
-                        func.name,
-                        func.params
-                            .iter()
-                            .enumerate()
-                            .map(|(i, p)| format!("${{{i}:{}}}", p.name, i = i + 1))
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )),
-                    insert_text_format: Some(tower_lsp::lsp_types::InsertTextFormat::SNIPPET),
-                    ..Default::default()
-                });
-            }
+            source: Some("flow".to_string()),
+            ..Default::default()
         }
-
-        completions
-    }
-
-    /// Get type completions from the program
-    fn get_type_completions(&self, program: &Program) -> Vec<CompletionItem> {
-        use flow_ast::Item;
-        use tower_lsp::lsp_types::{CompletionItem, CompletionItemKind};
-
-        let mut completions = Vec::new();
-
-        // Built-in types
-        let builtin_types = [
-            "Int", "I8", "I16", "I32", "I64", "I128", "UInt", "U8", "U16", "U32", "U64", "U128",
-            "Float", "F32", "F64", "Bool", "Char", "String", "Unit",
-        ];
-
-        for &type_name in &builtin_types {
-            completions.push(CompletionItem {
-                label: type_name.to_string(),
-                kind: Some(CompletionItemKind::TYPE_PARAMETER),
-                detail: Some(format!("Built-in type: {}", type_name)),
-                ..Default::default()
-            });
-        }
-
-        // User-defined structs
-        for item in &program.items {
-            if let Item::Struct(struct_def) = item {
-                completions.push(CompletionItem {
-                    label: struct_def.name.clone(),
-                    kind: Some(CompletionItemKind::STRUCT),
-                    detail: Some(format!("struct {}", struct_def.name)),
-                    ..Default::default()
-                });
-            }
-        }
-
-        completions
     }
 }
-
-/// Convert a Flow Span to an LSP Range
-fn span_to_range(span: &Span, text: &str) -> Range {
-    let start_pos = offset_to_position(span.start, text);
-    let end_pos = offset_to_position(span.end, text);
-    Range {
-        start: start_pos,
-        end: end_pos,
-    }
-}
-
-/// Convert a parse error range to an LSP Range
-/// Convert byte offset to LSP Position
-fn offset_to_position(offset: usize, text: &str) -> Position {
-    let mut line = 0u32;
-    let mut character = 0u32;
-
-    for (i, ch) in text.char_indices() {
-        if i >= offset {
-            break;
-        }
-
-        if ch == '\n' {
-            line += 1;
-            character = 0;
-        } else {
-            character += 1;
-        }
-    }
-
-    Position { line, character }
-}
-
-use tower_lsp::lsp_types::CompletionItem;
 
 impl Default for AnalyzerBridge {
     fn default() -> Self {

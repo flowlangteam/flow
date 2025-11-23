@@ -27,7 +27,6 @@ impl Parser {
     }
 
     pub fn parse(&mut self) -> ParseResult<Program> {
-        // Check for namespace declaration at the beginning
         let namespace = if self.check(&Token::As) {
             Some(self.parse_namespace_declaration()?)
         } else {
@@ -50,7 +49,6 @@ impl Parser {
     }
 
     fn parse_item(&mut self) -> ParseResult<Item> {
-        // Parse #[attribute] annotations
         let mut attributes = Vec::new();
         while self.check(&Token::Hash) {
             attributes.push(self.parse_attribute_application()?);
@@ -63,7 +61,6 @@ impl Parser {
             false
         };
 
-        // Check for ##macro marker on functions
         let is_macro = if self.check(&Token::DoubleHash) {
             self.advance();
             true
@@ -72,7 +69,9 @@ impl Parser {
         };
 
         match self.peek() {
-            Some(Token::Func) => Ok(Item::Function(self.parse_function(is_pub, is_macro, attributes)?)),
+            Some(Token::Func) => Ok(Item::Function(
+                self.parse_function(is_pub, is_macro, attributes)?,
+            )),
             Some(Token::Struct) => Ok(Item::Struct(self.parse_struct(is_pub, attributes)?)),
             Some(Token::Impl) => Ok(Item::Impl(self.parse_impl()?)),
             Some(Token::Extern) => Ok(Item::ExternBlock(self.parse_extern_block()?)),
@@ -85,13 +84,19 @@ impl Parser {
                 } else if !attributes.is_empty() {
                     Err(self.error("Attributes can only be applied to functions and structs"))
                 } else {
-                    Err(self.error("Expected item (func, struct, impl, extern, import, use, or attr)"))
+                    Err(self
+                        .error("Expected item (func, struct, impl, extern, import, use, or attr)"))
                 }
             }
         }
     }
 
-    fn parse_function(&mut self, is_pub: bool, is_macro: bool, attributes: Vec<AttributeApplication>) -> ParseResult<Function> {
+    fn parse_function(
+        &mut self,
+        is_pub: bool,
+        is_macro: bool,
+        attributes: Vec<AttributeApplication>,
+    ) -> ParseResult<Function> {
         let start_pos = self.pos;
         self.expect(&Token::Func)?;
         let name = self.expect_ident()?;
@@ -112,10 +117,13 @@ impl Parser {
 
         // Register macro if marked with ##macro
         if is_macro {
-            self.macros.insert(name.clone(), MacroDef {
-                params: params.clone(),
-                body: body.clone(),
-            });
+            self.macros.insert(
+                name.clone(),
+                MacroDef {
+                    params: params.clone(),
+                    body: body.clone(),
+                },
+            );
         }
 
         Ok(Function {
@@ -285,7 +293,11 @@ impl Parser {
         }
     }
 
-    fn parse_struct(&mut self, is_pub: bool, attributes: Vec<AttributeApplication>) -> ParseResult<Struct> {
+    fn parse_struct(
+        &mut self,
+        is_pub: bool,
+        attributes: Vec<AttributeApplication>,
+    ) -> ParseResult<Struct> {
         self.expect(&Token::Struct)?;
         let name = self.expect_ident()?;
         self.expect(&Token::LBrace)?;
@@ -1133,12 +1145,7 @@ impl Parser {
         Ok(Expr::Lambda { params, body })
     }
 
-    fn expand_macro(
-        &mut self,
-        name: String,
-        args: Vec<Expr>,
-        span: Span,
-    ) -> ParseResult<Expr> {
+    fn expand_macro(&mut self, name: String, args: Vec<Expr>, span: Span) -> ParseResult<Expr> {
         let definition = if let Some(def) = self.macros.get(&name) {
             def.clone()
         } else {
@@ -1147,8 +1154,7 @@ impl Parser {
                 format!("Unknown macro '{}'", name),
             );
             diag = diag.with_label(
-                Label::new(span.clone(), LabelStyle::Primary)
-                    .with_message("macro invocation here"),
+                Label::new(span.clone(), LabelStyle::Primary).with_message("macro invocation here"),
             );
             return Err(diag);
         };
@@ -1583,11 +1589,11 @@ mod tests {
     fn test_parse_public_functions_in_namespace() {
         let source = r#"
             as utils::math;
-            
+
             pub func add(x: i64, y: i64) -> i64 {
                 x + y
             }
-            
+
             func private_helper() -> i64 {
                 42
             }
@@ -1623,7 +1629,7 @@ mod tests {
     fn test_parse_namespaced_function_call() {
         let source = r#"
             use std::math;
-            
+
             func main() -> i64 {
                 math::add(5, 3)
             }
