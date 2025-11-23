@@ -49,7 +49,7 @@ impl Handlers {
         let document = self.document_manager.get_document(uri)?;
         let text = document.get_text();
 
-        let mut analyzer = self.analyzer_bridge.write().await;
+        let analyzer = self.analyzer_bridge.write().await;
         let items = analyzer.get_completions(&text, position);
 
         Some(CompletionResponse::Array(items))
@@ -197,23 +197,23 @@ impl Handlers {
         for (line_idx, line) in lines.iter().enumerate() {
             if line.contains("func") && line.contains(word) {
                 // Found a potential function definition
-                if let Some(func_start) = line.find("func") {
-                    if let Some(name_start) = line[func_start..].find(word) {
-                        let char_pos = func_start + name_start;
-                        return Some(Location {
-                            uri: document.uri.clone(),
-                            range: Range {
-                                start: Position {
-                                    line: line_idx as u32,
-                                    character: char_pos as u32,
-                                },
-                                end: Position {
-                                    line: line_idx as u32,
-                                    character: (char_pos + word.len()) as u32,
-                                },
+                if let Some(func_start) = line.find("func")
+                    && let Some(name_start) = line[func_start..].find(word)
+                {
+                    let char_pos = func_start + name_start;
+                    return Some(Location {
+                        uri: document.uri.clone(),
+                        range: Range {
+                            start: Position {
+                                line: line_idx as u32,
+                                character: char_pos as u32,
                             },
-                        });
-                    }
+                            end: Position {
+                                line: line_idx as u32,
+                                character: (char_pos + word.len()) as u32,
+                            },
+                        },
+                    });
                 }
             }
         }

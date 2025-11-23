@@ -65,6 +65,7 @@ impl ClassWriter {
         self.access_flags = flags;
     }
 
+    #[allow(dead_code)]
     pub fn add_interface(&mut self, interface: impl Into<String>) {
         self.interfaces.push(interface.into());
     }
@@ -82,7 +83,7 @@ impl ClassWriter {
         });
     }
 
-    pub fn add_method(&mut self, name: impl Into<String>) -> MethodBuilder {
+    pub fn add_method(&mut self, name: impl Into<String>) -> MethodBuilder<'_> {
         MethodBuilder::new(self, name.into())
     }
 

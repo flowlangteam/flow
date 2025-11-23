@@ -4,7 +4,8 @@
 // === I/O Functions ===
 
 #[unsafe(no_mangle)]
-pub extern "C" fn flow_print(ptr: *const u8, len: usize) {
+#[allow(clippy::missing_safety_doc)]
+pub unsafe extern "C" fn flow_print(ptr: *const u8, len: usize) {
     unsafe {
         let slice = std::slice::from_raw_parts(ptr, len);
         if let Ok(s) = std::str::from_utf8(slice) {
@@ -14,7 +15,8 @@ pub extern "C" fn flow_print(ptr: *const u8, len: usize) {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn flow_println(ptr: *const u8, len: usize) {
+#[allow(clippy::missing_safety_doc)]
+pub unsafe extern "C" fn flow_println(ptr: *const u8, len: usize) {
     unsafe {
         let slice = std::slice::from_raw_parts(ptr, len);
         if let Ok(s) = std::str::from_utf8(slice) {
@@ -119,7 +121,8 @@ pub struct FlowString {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn flow_string_new(data: *const u8, len: usize) -> *mut FlowString {
+#[allow(clippy::missing_safety_doc)]
+pub unsafe extern "C" fn flow_string_new(data: *const u8, len: usize) -> *mut FlowString {
     unsafe {
         let slice = std::slice::from_raw_parts(data, len);
         let owned = slice.to_vec();
@@ -136,9 +139,10 @@ pub extern "C" fn flow_string_new(data: *const u8, len: usize) -> *mut FlowStrin
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn flow_string_free(s: *mut FlowString) {
-    unsafe {
-        if !s.is_null() {
+#[allow(clippy::missing_safety_doc)]
+pub unsafe extern "C" fn flow_string_free(s: *mut FlowString) {
+    if !s.is_null() {
+        unsafe {
             let string = Box::from_raw(s);
             let _ = Vec::from_raw_parts(string.data as *mut u8, string.len, string.capacity);
         }
@@ -146,15 +150,16 @@ pub extern "C" fn flow_string_free(s: *mut FlowString) {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn flow_string_concat(
+#[allow(clippy::missing_safety_doc)]
+pub unsafe extern "C" fn flow_string_concat(
     a: *const FlowString,
     b: *const FlowString,
 ) -> *mut FlowString {
-    unsafe {
-        if a.is_null() || b.is_null() {
-            return std::ptr::null_mut();
-        }
+    if a.is_null() || b.is_null() {
+        return std::ptr::null_mut();
+    }
 
+    unsafe {
         let a_slice = std::slice::from_raw_parts((*a).data, (*a).len);
         let b_slice = std::slice::from_raw_parts((*b).data, (*b).len);
 
@@ -176,13 +181,15 @@ pub extern "C" fn flow_string_concat(
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn flow_string_len(s: *const FlowString) -> usize {
-    unsafe { if s.is_null() { 0 } else { (*s).len } }
+#[allow(clippy::missing_safety_doc)]
+pub unsafe extern "C" fn flow_string_len(s: *const FlowString) -> usize {
+    if s.is_null() { 0 } else { unsafe { (*s).len } }
 }
 
 // Generic memory allocation
 #[unsafe(no_mangle)]
-pub extern "C" fn flow_alloc(size: usize, align: usize) -> *mut u8 {
+#[allow(clippy::missing_safety_doc)]
+pub unsafe extern "C" fn flow_alloc(size: usize, align: usize) -> *mut u8 {
     unsafe {
         let layout = std::alloc::Layout::from_size_align_unchecked(size, align);
         std::alloc::alloc(layout)
@@ -190,7 +197,8 @@ pub extern "C" fn flow_alloc(size: usize, align: usize) -> *mut u8 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn flow_alloc_zeroed(size: usize, align: usize) -> *mut u8 {
+#[allow(clippy::missing_safety_doc)]
+pub unsafe extern "C" fn flow_alloc_zeroed(size: usize, align: usize) -> *mut u8 {
     unsafe {
         let layout = std::alloc::Layout::from_size_align_unchecked(size, align);
         std::alloc::alloc_zeroed(layout)
@@ -198,9 +206,10 @@ pub extern "C" fn flow_alloc_zeroed(size: usize, align: usize) -> *mut u8 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn flow_free(ptr: *mut u8, size: usize, align: usize) {
-    unsafe {
-        if !ptr.is_null() {
+#[allow(clippy::missing_safety_doc)]
+pub unsafe extern "C" fn flow_free(ptr: *mut u8, size: usize, align: usize) {
+    if !ptr.is_null() {
+        unsafe {
             let layout = std::alloc::Layout::from_size_align_unchecked(size, align);
             std::alloc::dealloc(ptr, layout);
         }
@@ -208,17 +217,18 @@ pub extern "C" fn flow_free(ptr: *mut u8, size: usize, align: usize) {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn flow_realloc(
+#[allow(clippy::missing_safety_doc)]
+pub unsafe extern "C" fn flow_realloc(
     ptr: *mut u8,
     old_size: usize,
     new_size: usize,
     align: usize,
 ) -> *mut u8 {
-    unsafe {
-        if ptr.is_null() {
-            return flow_alloc(new_size, align);
-        }
+    if ptr.is_null() {
+        return unsafe { flow_alloc(new_size, align) };
+    }
 
+    unsafe {
         let old_layout = std::alloc::Layout::from_size_align_unchecked(old_size, align);
         std::alloc::realloc(ptr, old_layout, new_size)
     }
@@ -227,7 +237,8 @@ pub extern "C" fn flow_realloc(
 // === Array Operations ===
 
 #[unsafe(no_mangle)]
-pub extern "C" fn flow_array_new(elem_size: usize, capacity: usize) -> *mut FlowArray {
+#[allow(clippy::missing_safety_doc)]
+pub unsafe extern "C" fn flow_array_new(elem_size: usize, capacity: usize) -> *mut FlowArray {
     let total_size = elem_size * capacity;
     let data = unsafe { flow_alloc_zeroed(total_size, 8) };
 
@@ -240,9 +251,10 @@ pub extern "C" fn flow_array_new(elem_size: usize, capacity: usize) -> *mut Flow
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn flow_array_free(arr: *mut FlowArray) {
-    unsafe {
-        if !arr.is_null() {
+#[allow(clippy::missing_safety_doc)]
+pub unsafe extern "C" fn flow_array_free(arr: *mut FlowArray) {
+    if !arr.is_null() {
+        unsafe {
             let array = Box::from_raw(arr);
             flow_free(array.data, array.capacity * array.elem_size, 8);
         }
@@ -302,7 +314,8 @@ pub extern "C" fn flow_max_f64(a: f64, b: f64) -> f64 {
 // === Utility Functions ===
 
 #[unsafe(no_mangle)]
-pub extern "C" fn flow_panic(msg: *const u8, len: usize) -> ! {
+#[allow(clippy::missing_safety_doc)]
+pub unsafe extern "C" fn flow_panic(msg: *const u8, len: usize) -> ! {
     unsafe {
         let slice = std::slice::from_raw_parts(msg, len);
         if let Ok(s) = std::str::from_utf8(slice) {
@@ -314,7 +327,8 @@ pub extern "C" fn flow_panic(msg: *const u8, len: usize) -> ! {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn flow_assert(condition: bool, msg: *const u8, len: usize) {
+#[allow(clippy::missing_safety_doc)]
+pub unsafe extern "C" fn flow_assert(condition: bool, msg: *const u8, len: usize) {
     if !condition {
         unsafe {
             flow_panic(msg, len);
@@ -329,9 +343,9 @@ mod tests {
     #[test]
     fn test_string_operations() {
         let data = b"Hello";
-        let s = flow_string_new(data.as_ptr(), data.len());
-        assert_eq!(flow_string_len(s), 5);
         unsafe {
+            let s = flow_string_new(data.as_ptr(), data.len());
+            assert_eq!(flow_string_len(s), 5);
             flow_string_free(s);
         }
     }

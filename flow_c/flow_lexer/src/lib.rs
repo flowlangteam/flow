@@ -245,13 +245,13 @@ mod tests {
 
     #[test]
     fn test_literals() {
-        let source = r#"42 3.14 "hello""#;
+        let source = r#"42 3.25 "hello""#;
         let tokens: Vec<_> = Lexer::new(source).map(|(t, _)| t).collect();
         assert_eq!(
             tokens,
             vec![
                 Token::Integer(42),
-                Token::Float(3.14),
+                Token::Float(3.25),
                 Token::String("hello".to_string())
             ]
         );

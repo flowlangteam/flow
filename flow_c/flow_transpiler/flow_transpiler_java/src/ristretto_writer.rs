@@ -17,6 +17,7 @@ use flow_transpiler::{Result, TranspileContext, TranspilerError};
 pub struct RistrettoCodeGenerator {
     class_name: String,
     context: TranspileContext,
+    #[allow(dead_code)]
     namespace: Option<String>,
 }
 
@@ -172,11 +173,11 @@ impl RistrettoCodeGenerator {
 
         // Add methods from impl blocks
         for item in &program.items {
-            if let Item::Impl(impl_block) = item {
-                if impl_block.struct_name == struct_def.name {
-                    for method in &impl_block.methods {
-                        methods.push(self.create_instance_method(&mut constant_pool, method)?);
-                    }
+            if let Item::Impl(impl_block) = item
+                && impl_block.struct_name == struct_def.name
+            {
+                for method in &impl_block.methods {
+                    methods.push(self.create_instance_method(&mut constant_pool, method)?);
                 }
             }
         }
@@ -646,9 +647,9 @@ impl RistrettoCodeGenerator {
                     code.push(Instruction::Iconst_4);
                 } else if val == 5 {
                     code.push(Instruction::Iconst_5);
-                } else if val >= -128 && val <= 127 {
+                } else if (-128..=127).contains(&val) {
                     code.push(Instruction::Bipush(val as i8));
-                } else if val >= -32768 && val <= 32767 {
+                } else if (-32768..=32767).contains(&val) {
                     code.push(Instruction::Sipush(val as i16));
                 } else {
                     // Use LDC for larger values
@@ -739,7 +740,7 @@ impl RistrettoCodeGenerator {
 
                 // Generate code for field initializers in order
                 // TODO: Match field order with struct definition
-                for (_field_name, field_expr) in fields {
+                for field_expr in fields.values() {
                     self.generate_expr_code(constant_pool, code, field_expr)?;
                 }
 
@@ -815,12 +816,6 @@ impl RistrettoCodeGenerator {
                     }
                     BinOp::Or => {
                         code.push(Instruction::Ior);
-                    }
-                    _ => {
-                        // Other operators not yet implemented
-                        code.push(Instruction::Pop);
-                        code.push(Instruction::Pop);
-                        code.push(Instruction::Iconst_0);
                     }
                 }
             }

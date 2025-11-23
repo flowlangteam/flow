@@ -156,18 +156,19 @@ impl AnalyzerBridge {
         // Check return type matches
         if let Some(expected_return) = &func.return_type {
             let inferencer = TypeInferencer::new(context);
-            if let Some(actual_return) = inferencer.infer_expr(&func.body, &locals) {
-                if expected_return != &actual_return && actual_return != Type::Unit {
-                    diagnostics.push(self.create_diagnostic(
-                        DiagnosticSeverity::ERROR,
-                        func.span.clone(),
-                        "E0014",
-                        format!(
-                            "Function '{}' expected to return {:?}, but returns {:?}",
-                            func.name, expected_return, actual_return
-                        ),
-                    ));
-                }
+            if let Some(actual_return) = inferencer.infer_expr(&func.body, &locals)
+                && expected_return != &actual_return
+                && actual_return != Type::Unit
+            {
+                diagnostics.push(self.create_diagnostic(
+                    DiagnosticSeverity::ERROR,
+                    func.span.clone(),
+                    "E0002",
+                    format!(
+                        "Function '{}' expected to return {:?}, but returns {:?}",
+                        func.name, expected_return, actual_return
+                    ),
+                ));
             }
         }
     }
@@ -323,23 +324,17 @@ impl AnalyzerBridge {
 
                 // Check if field exists on struct
                 let inferencer = TypeInferencer::new(context);
-                if let Some(ty) = inferencer.infer_expr(expr, locals) {
-                    if let Type::Named(struct_name) = ty {
-                        if let Some(struct_info) = context.get_struct(&struct_name) {
-                            let field_exists =
-                                struct_info.fields.iter().any(|(name, _, _)| name == field);
-                            if !field_exists {
-                                diagnostics.push(self.create_diagnostic(
-                                    DiagnosticSeverity::ERROR,
-                                    Span::new(0, 0),
-                                    "E0011",
-                                    format!(
-                                        "Field '{}' not found on struct '{}'",
-                                        field, struct_name
-                                    ),
-                                ));
-                            }
-                        }
+                if let Some(Type::Named(struct_name)) = inferencer.infer_expr(expr, locals)
+                    && let Some(struct_info) = context.get_struct(&struct_name)
+                {
+                    let field_exists = struct_info.fields.iter().any(|(name, _, _)| name == field);
+                    if !field_exists {
+                        diagnostics.push(self.create_diagnostic(
+                            DiagnosticSeverity::ERROR,
+                            Span::new(0, 0),
+                            "E0011",
+                            format!("Field '{}' not found on struct '{}'", field, struct_name),
+                        ));
                     }
                 }
             }
@@ -348,20 +343,15 @@ impl AnalyzerBridge {
 
                 // Check if method exists on struct
                 let inferencer = TypeInferencer::new(context);
-                if let Some(ty) = inferencer.infer_expr(expr, locals) {
-                    if let Type::Named(struct_name) = ty {
-                        if context.get_method(&struct_name, method).is_none() {
-                            diagnostics.push(self.create_diagnostic(
-                                DiagnosticSeverity::ERROR,
-                                Span::new(0, 0),
-                                "E0004",
-                                format!(
-                                    "Method '{}' not found on struct '{}'",
-                                    method, struct_name
-                                ),
-                            ));
-                        }
-                    }
+                if let Some(Type::Named(struct_name)) = inferencer.infer_expr(expr, locals)
+                    && context.get_method(&struct_name, method).is_none()
+                {
+                    diagnostics.push(self.create_diagnostic(
+                        DiagnosticSeverity::ERROR,
+                        Span::new(0, 0),
+                        "E0004",
+                        format!("Method '{}' not found on struct '{}'", method, struct_name),
+                    ));
                 }
 
                 // Validate arguments
@@ -455,11 +445,10 @@ impl AnalyzerBridge {
             Expr::Lambda { body, .. } => {
                 self.validate_expr(body, context, locals, diagnostics);
             }
-            Expr::Return(expr_opt) => {
-                if let Some(inner_expr) = expr_opt {
-                    self.validate_expr(inner_expr, context, locals, diagnostics);
-                }
+            Expr::Return(Some(inner_expr)) => {
+                self.validate_expr(inner_expr, context, locals, diagnostics);
             }
+            Expr::Return(None) => {}
             _ => {}
         }
     }
@@ -495,7 +484,7 @@ impl AnalyzerBridge {
             }
 
             // Add structs
-            for (name, _) in &context.structs {
+            for name in context.structs.keys() {
                 items.push(CompletionItem {
                     label: name.clone(),
                     kind: Some(CompletionItemKind::STRUCT),

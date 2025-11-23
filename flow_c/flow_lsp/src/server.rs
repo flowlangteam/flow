@@ -17,6 +17,7 @@ use tower_lsp::{Client, LanguageServer, LspService, Server, jsonrpc::Result};
 pub struct FlowLanguageServer {
     client: Client,
     document_manager: Arc<DocumentManager>,
+    #[allow(dead_code)]
     analyzer_bridge: Arc<RwLock<AnalyzerBridge>>,
     handlers: Handlers,
 }
@@ -40,7 +41,7 @@ impl FlowLanguageServer {
         let stdin = tokio::io::stdin();
         let stdout = tokio::io::stdout();
 
-        let (service, socket) = LspService::new(|client| FlowLanguageServer::new(client));
+        let (service, socket) = LspService::new(FlowLanguageServer::new);
 
         tracing::info!("Starting Flow Language Server");
         Server::new(stdin, stdout, socket).serve(service).await;

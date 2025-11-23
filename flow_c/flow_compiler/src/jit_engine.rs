@@ -546,6 +546,7 @@ impl<'a, M: Module> CodegenState<'a, M> {
         Ok(layout)
     }
 
+    #[allow(clippy::only_used_in_recursion)]
     fn compute_type_layout(
         &mut self,
         ty: &flow_ast::Type,
@@ -1520,7 +1521,7 @@ fn compile_expression(
                 let align_shift = align.trailing_zeros() as u8;
                 let slot = builder.create_sized_stack_slot(StackSlotData::new(
                     StackSlotKind::ExplicitSlot,
-                    u32::from(slot_size),
+                    slot_size,
                     align_shift,
                 ));
                 builder.ins().stack_store(value_val, slot, 0);
@@ -1634,7 +1635,7 @@ fn compile_expression(
             if merge_param_ty.is_some() {
                 let params = builder.block_params(merge_block);
                 params
-                    .get(0)
+                    .first()
                     .copied()
                     .ok_or_else(|| "If expression missing merge value".to_string())
             } else {
@@ -1760,7 +1761,7 @@ fn compile_expression(
             if return_type.is_some() {
                 let results = builder.inst_results(call_inst);
                 results
-                    .get(0)
+                    .first()
                     .copied()
                     .ok_or_else(|| format!("Call to '{}' did not produce a value", func_name))
             } else {
@@ -1788,7 +1789,7 @@ fn compile_expression(
             let call_inst = builder.ins().call(malloc_ref, &[size_val]);
             let struct_ptr = builder
                 .inst_results(call_inst)
-                .get(0)
+                .first()
                 .copied()
                 .ok_or_else(|| "malloc call did not return a pointer".to_string())?;
 
@@ -1881,7 +1882,7 @@ fn compile_expression(
             let call_inst = builder.ins().call(func_ref, &compiled_args);
             if return_type.is_some() {
                 let results = builder.inst_results(call_inst);
-                results.get(0).copied().ok_or_else(|| {
+                results.first().copied().ok_or_else(|| {
                     format!("Call to method '{}' did not produce a value", method_key)
                 })
             } else {

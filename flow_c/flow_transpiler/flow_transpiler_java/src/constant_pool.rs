@@ -237,6 +237,7 @@ impl ConstantPool {
             .expect("Class entry not found in constant pool")
     }
 
+    #[allow(dead_code)]
     pub fn get_string_index(&self, value: &str) -> u16 {
         *self
             .string_map

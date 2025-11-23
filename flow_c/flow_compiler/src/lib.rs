@@ -1,3 +1,7 @@
+#![allow(clippy::new_without_default)]
+#![allow(clippy::needless_if)]
+#![allow(clippy::too_many_arguments)]
+
 use flow_ast::Program;
 use std::collections::HashMap;
 use thiserror::Error;
@@ -59,7 +63,7 @@ pub enum CompilationTarget {
     JavaBytecode,
     /// Transpile to Python source code (future)
     Python,
-    /// Transpile to JavaScript source code (future)  
+    /// Transpile to JavaScript source code (future)
     JavaScript,
     /// Transpile to C source code (future)
     C,

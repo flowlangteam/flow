@@ -53,9 +53,10 @@ pub extern "C" fn flow_print_bool(value: i8) {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn flow_print_string(s: *const FlowString) {
-    unsafe {
-        if !s.is_null() {
+#[allow(clippy::missing_safety_doc)]
+pub unsafe extern "C" fn flow_print_string(s: *const FlowString) {
+    if !s.is_null() {
+        unsafe {
             let slice = std::slice::from_raw_parts((*s).data, (*s).len);
             let string = std::str::from_utf8_unchecked(slice);
             println!("{}", string);
@@ -73,9 +74,10 @@ pub extern "C" fn flow_alloc(size: usize) -> *mut u8 {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn flow_free(ptr: *mut u8, size: usize) {
-    unsafe {
-        if !ptr.is_null() {
+#[allow(clippy::missing_safety_doc)]
+pub unsafe extern "C" fn flow_free(ptr: *mut u8, size: usize) {
+    if !ptr.is_null() {
+        unsafe {
             let layout = Layout::from_size_align_unchecked(size, 8);
             dealloc(ptr, layout);
         }

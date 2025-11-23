@@ -850,10 +850,10 @@ fn analysis_errors_to_rich(
 #[allow(dead_code)]
 /// Extract function name from error message
 fn extract_function_name(message: &str) -> Option<String> {
-    if let Some(start) = message.find('\'') {
-        if let Some(end) = message[start + 1..].find('\'') {
-            return Some(message[start + 1..start + 1 + end].to_string());
-        }
+    if let Some(start) = message.find('\'')
+        && let Some(end) = message[start + 1..].find('\'')
+    {
+        return Some(message[start + 1..start + 1 + end].to_string());
     }
     None
 }

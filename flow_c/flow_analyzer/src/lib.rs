@@ -493,18 +493,18 @@ impl Analyzer {
         }
 
         for method in &impl_block.methods {
-            if let Some(existing) = self.find_struct_info(struct_name) {
-                if existing.methods.contains_key(&method.name) {
-                    self.errors.push(AnalysisError {
-                        message: format!(
-                            "Method '{}' is already defined for struct '{}'",
-                            method.name, struct_name
-                        ),
-                        span: method.span.clone(),
-                        severity: Severity::Error,
-                    });
-                    continue;
-                }
+            if let Some(existing) = self.find_struct_info(struct_name)
+                && existing.methods.contains_key(&method.name)
+            {
+                self.errors.push(AnalysisError {
+                    message: format!(
+                        "Method '{}' is already defined for struct '{}'",
+                        method.name, struct_name
+                    ),
+                    span: method.span.clone(),
+                    severity: Severity::Error,
+                });
+                continue;
             }
 
             let resolved_params = method
@@ -612,17 +612,17 @@ impl Analyzer {
             } => {
                 let value_type = self.analyze_expr(value)?;
 
-                if let Some(annotated_type) = ty {
-                    if !self.types_compatible(&value_type, annotated_type) {
-                        self.errors.push(AnalysisError {
-                            message: format!(
-                                "Type mismatch: expected {:?}, found {:?}",
-                                annotated_type, value_type
-                            ),
-                            span: span.clone(),
-                            severity: Severity::Error,
-                        });
-                    }
+                if let Some(annotated_type) = ty
+                    && !self.types_compatible(&value_type, annotated_type)
+                {
+                    self.errors.push(AnalysisError {
+                        message: format!(
+                            "Type mismatch: expected {:?}, found {:?}",
+                            annotated_type, value_type
+                        ),
+                        span: Span::new(0, 0),
+                        severity: Severity::Error,
+                    });
                 }
 
                 let var_type = ty.clone().unwrap_or(value_type);
@@ -889,19 +889,19 @@ impl Analyzer {
 
                 for (idx, arg_expr) in args.iter().enumerate() {
                     let arg_type = self.analyze_expr(arg_expr)?;
-                    if let Some(expected_param) = method_info.params.get(idx + 1) {
-                        if !self.types_compatible(&arg_type, &expected_param.ty) {
-                            self.errors.push(AnalysisError {
-                                message: format!(
-                                    "Argument {} has type {:?}, expected {:?}",
-                                    idx + 1,
-                                    arg_type,
-                                    expected_param.ty
-                                ),
-                                span: span.clone(),
-                                severity: Severity::Error,
-                            });
-                        }
+                    if let Some(expected_param) = method_info.params.get(idx + 1)
+                        && !self.types_compatible(&arg_type, &expected_param.ty)
+                    {
+                        self.errors.push(AnalysisError {
+                            message: format!(
+                                "Argument {} has type {:?}, expected {:?}",
+                                idx + 1,
+                                arg_type,
+                                expected_param.ty
+                            ),
+                            span: Span::new(0, 0),
+                            severity: Severity::Error,
+                        });
                     }
                 }
 
@@ -914,12 +914,12 @@ impl Analyzer {
                 self.push_scope();
                 let result = self.analyze_expr(body)?;
 
-                if let Some(scope) = self.scopes.last() {
-                    if !scope.temp_allocations.is_empty() {
-                        self.warnings.push(Warning::PossibleMemoryLeak {
-                            span: Span::new(0, 0),
-                        });
-                    }
+                if let Some(scope) = self.scopes.last()
+                    && !scope.temp_allocations.is_empty()
+                {
+                    self.warnings.push(Warning::PossibleMemoryLeak {
+                        span: Span::new(0, 0),
+                    });
                 }
 
                 self.pop_scope();
@@ -1020,14 +1020,14 @@ impl Analyzer {
                 }
 
                 if param_types.len() > args.len() {
-                    for missing_idx in args.len()..param_types.len() {
+                    for (idx, param_type) in param_types.iter().enumerate().skip(args.len()) {
                         self.errors.push(AnalysisError {
                             message: format!(
                                 "Missing argument {} of type {:?}",
-                                missing_idx + 1,
-                                param_types[missing_idx]
+                                idx + 1,
+                                param_type
                             ),
-                            span: span.clone(),
+                            span: Span::new(0, 0),
                             severity: Severity::Error,
                         });
                     }
@@ -1114,14 +1114,12 @@ impl Analyzer {
                     if module_parts.len() == 2 {
                         let (ns, filename) = (module_parts[0], module_parts[1]);
 
-                        if namespace_or_alias == ns
+                        if (namespace_or_alias == ns
                             || namespace_or_alias == filename
-                            || namespace_or_alias == module_key
+                            || namespace_or_alias == module_key)
+                            && let Some(func_info) = module_info.public_functions.get(function_name)
                         {
-                            if let Some(func_info) = module_info.public_functions.get(function_name)
-                            {
-                                return Some(func_info.clone());
-                            }
+                            return Some(func_info.clone());
                         }
                     }
                 }
@@ -1166,13 +1164,14 @@ impl Analyzer {
     }
 
     fn mark_method_used(&mut self, struct_name: &str, method: &str) {
-        if let Some(struct_info) = self.find_struct_info_mut(struct_name) {
-            if let Some(method_info) = struct_info.methods.get_mut(method) {
-                method_info.used = true;
-            }
+        if let Some(struct_info) = self.find_struct_info_mut(struct_name)
+            && let Some(method_info) = struct_info.methods.get_mut(method)
+        {
+            method_info.used = true;
         }
     }
 
+    #[allow(clippy::only_used_in_recursion)]
     fn types_compatible(&self, a: &Type, b: &Type) -> bool {
         if a == b {
             return true;
@@ -1279,10 +1278,10 @@ impl Default for Analyzer {
 fn resolve_self_type(ty: &Type, self_struct: Option<&str>) -> Type {
     match ty {
         Type::Named(name) => {
-            if let Some(struct_name) = self_struct {
-                if name == "Self" {
-                    return Type::Named(struct_name.to_string());
-                }
+            if let Some(struct_name) = self_struct
+                && name == "Self"
+            {
+                return Type::Named(struct_name.to_string());
             }
             Type::Named(name.clone())
         }
@@ -1365,7 +1364,7 @@ mod tests {
         let mut analyzer = Analyzer::new();
         let _ = analyzer.analyze(&program);
 
-        assert!(analyzer.get_warnings().len() > 0);
+        assert!(!analyzer.get_warnings().is_empty());
     }
 
     #[test]
@@ -1501,7 +1500,7 @@ fn format_type(ty: &Type) -> String {
         Type::Function(params, ret) => {
             let params_str = params
                 .iter()
-                .map(|t| format_type(t))
+                .map(format_type)
                 .collect::<Vec<_>>()
                 .join(", ");
             format!("fn({}) -> {}", params_str, format_type(ret))

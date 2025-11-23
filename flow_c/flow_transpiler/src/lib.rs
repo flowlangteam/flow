@@ -362,8 +362,7 @@ impl<'a> TypeInferencer<'a> {
             Expr::Match { arms, .. } => {
                 // Return type of first arm (assuming all arms have same type)
                 arms.first()
-                    .map(|arm| self.infer_expr(&arm.body, locals))
-                    .flatten()
+                    .and_then(|arm| self.infer_expr(&arm.body, locals))
             }
 
             _ => None,

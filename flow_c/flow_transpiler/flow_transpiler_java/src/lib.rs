@@ -310,12 +310,12 @@ impl JavaTranspiler {
             }
             Expr::Field { expr, field } => {
                 let base_ty = self.infer_expr_type(expr, locals)?;
-                if let Type::Named(struct_name) = base_ty {
-                    if let Some(struct_info) = self.context.structs.get(&struct_name) {
-                        for (fname, field_ty, _) in &struct_info.fields {
-                            if fname == field {
-                                return Some(field_ty.clone());
-                            }
+                if let Type::Named(struct_name) = base_ty
+                    && let Some(struct_info) = self.context.structs.get(&struct_name)
+                {
+                    for (fname, field_ty, _) in &struct_info.fields {
+                        if fname == field {
+                            return Some(field_ty.clone());
                         }
                     }
                 }
@@ -1079,7 +1079,7 @@ mod tests {
         }
     }
 
-    fn find_method_count_offset(bytes: &[u8]) -> Option<usize> {
+    fn find_method_count_offset(_bytes: &[u8]) -> Option<usize> {
         // In a class file:
         // - Magic (4 bytes)
         // - Minor version (2 bytes)

@@ -1,3 +1,5 @@
+#![allow(clippy::result_large_err)]
+
 use flow_ast::{Diagnostic, DiagnosticSeverity, Label, LabelStyle, Span, *};
 use flow_lexer::{Lexer, Token};
 use std::collections::HashMap;
@@ -1184,6 +1186,7 @@ impl Parser {
         Ok(self.substitute_expr(&definition.body, &mapping))
     }
 
+    #[allow(clippy::only_used_in_recursion)]
     fn substitute_expr(&self, template: &Expr, mapping: &HashMap<String, Expr>) -> Expr {
         match template {
             Expr::Integer(n) => Expr::Integer(*n),

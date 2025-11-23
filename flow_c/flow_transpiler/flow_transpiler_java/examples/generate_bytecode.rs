@@ -1,3 +1,4 @@
+#![allow(clippy::collapsible_if)]
 use flow_ast::*;
 use flow_transpiler::Transpiler;
 use flow_transpiler_java::JavaTranspiler;

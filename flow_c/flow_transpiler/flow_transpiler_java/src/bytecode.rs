@@ -3,11 +3,15 @@
 // Access flags for classes
 pub const ACC_PUBLIC: u16 = 0x0001;
 pub const ACC_PRIVATE: u16 = 0x0002;
+#[allow(dead_code)]
 pub const ACC_PROTECTED: u16 = 0x0004;
 pub const ACC_STATIC: u16 = 0x0008;
+#[allow(dead_code)]
 pub const ACC_FINAL: u16 = 0x0010;
 pub const ACC_SUPER: u16 = 0x0020;
+#[allow(dead_code)]
 pub const ACC_INTERFACE: u16 = 0x0200;
+#[allow(dead_code)]
 pub const ACC_ABSTRACT: u16 = 0x0400;
 
 // Java bytecode opcodes
@@ -125,12 +129,14 @@ pub const PUTFIELD: u8 = 0xB5;
 pub const INVOKEVIRTUAL: u8 = 0xB6;
 pub const INVOKESPECIAL: u8 = 0xB7;
 pub const INVOKESTATIC: u8 = 0xB8;
+#[allow(dead_code)]
 pub const INVOKEINTERFACE: u8 = 0xB9;
 
 pub const NEW: u8 = 0xBB;
 pub const DUP: u8 = 0x59;
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum ConstantValue {
     Integer(i32),
     Long(i64),
@@ -140,6 +146,7 @@ pub enum ConstantValue {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub enum Instruction {
     // Constants
     IConst(i32),
@@ -269,25 +276,23 @@ impl CodeBuilder {
     }
 
     pub fn patch_jump(&mut self, index: usize, target_offset: i16) {
-        if let Some(instr) = self.instructions.get_mut(index) {
-            match instr {
-                Instruction::IfEq(offset)
-                | Instruction::IfNe(offset)
-                | Instruction::IfLt(offset)
-                | Instruction::IfGe(offset)
-                | Instruction::IfGt(offset)
-                | Instruction::IfLe(offset)
-                | Instruction::IfICmpEq(offset)
-                | Instruction::IfICmpNe(offset)
-                | Instruction::IfICmpLt(offset)
-                | Instruction::IfICmpGe(offset)
-                | Instruction::IfICmpGt(offset)
-                | Instruction::IfICmpLe(offset)
-                | Instruction::Goto(offset) => {
-                    *offset = target_offset;
-                }
-                _ => {}
-            }
+        if let Some(
+            Instruction::IfEq(offset)
+            | Instruction::IfNe(offset)
+            | Instruction::IfLt(offset)
+            | Instruction::IfGe(offset)
+            | Instruction::IfGt(offset)
+            | Instruction::IfLe(offset)
+            | Instruction::IfICmpEq(offset)
+            | Instruction::IfICmpNe(offset)
+            | Instruction::IfICmpLt(offset)
+            | Instruction::IfICmpGe(offset)
+            | Instruction::IfICmpGt(offset)
+            | Instruction::IfICmpLe(offset)
+            | Instruction::Goto(offset),
+        ) = self.instructions.get_mut(index)
+        {
+            *offset = target_offset;
         }
     }
 
