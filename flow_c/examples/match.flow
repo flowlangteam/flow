@@ -1,5 +1,5 @@
 // Match expression with pattern matching
-fn classify(n: Int) -> Int {
+func classify(n: Int) -> Int {
     match n {
         0 => 0,
         1 => 1,
@@ -7,6 +7,6 @@ fn classify(n: Int) -> Int {
     }
 }
 
-fn main() -> Int {
+func main() -> Int {
     classify(42)
 }

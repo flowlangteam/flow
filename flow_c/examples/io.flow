@@ -1,5 +1,5 @@
 // I/O operations using stdlib
-extern "C" {
+link "C" {
     func flow_print_i64(i64);
     func flow_println(ptr: *u8, len: usize);
     func flow_read_i64() -> i64;

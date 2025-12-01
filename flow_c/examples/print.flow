@@ -1,5 +1,5 @@
 // Native printing example using C stdlib
-extern "C" {
+link "C" {
     func puts(*u8) -> i32;
 }
 

@@ -1,6 +1,6 @@
 // Simple extern block test
 
-extern "C" {
+link "C" {
     func abs(i64) -> i64;
 }
 
