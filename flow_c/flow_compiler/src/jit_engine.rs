@@ -733,6 +733,7 @@ impl<'a, M: Module> CodegenState<'a, M> {
                 namespace: self.current_namespace.as_deref(),
                 pointer_type,
                 struct_layouts: self.struct_layouts,
+                current_return_type: return_type.as_ref(),
             };
 
             compile_expression(
@@ -1262,6 +1263,7 @@ struct ExpressionContext<'a, 'b, M: Module> {
     namespace: Option<&'b str>,
     pointer_type: types::Type,
     struct_layouts: &'b HashMap<String, StructLayout>,
+    current_return_type: Option<&'b flow_ast::Type>,
 }
 
 impl<'a, 'b, M: Module> ExpressionContext<'a, 'b, M> {
@@ -1917,6 +1919,41 @@ fn compile_expression(
             Ok(builder
                 .ins()
                 .load(cranelift_field_ty, MemFlags::new(), field_addr, 0))
+        }
+        Expr::Return(expr_opt) => {
+            if let Some(expr) = expr_opt {
+                let ret_ty = context.current_return_type;
+                let val = compile_expression(expr, builder, variables, context, ret_ty)?;
+                builder.ins().return_(&[val]);
+            } else {
+                builder.ins().return_(&[]);
+            }
+
+            // Create a new block for the unreachable code to satisfy the requirement
+            // that compile_expression returns a Value, which requires emitting an instruction.
+            // Since the previous block is filled with a return, we must start a new one.
+            let unreachable_block = builder.create_block();
+            builder.switch_to_block(unreachable_block);
+            builder.seal_block(unreachable_block);
+
+            // Return a dummy value matching expected_type if possible to satisfy the type system
+            // even though this code is unreachable.
+            let dummy_ty = if let Some(ty) = expected_type {
+                type_to_cranelift(ty, context.pointer_type(), Some(context.struct_layouts))
+                    .unwrap_or(types::I64)
+            } else {
+                types::I64
+            };
+
+            if dummy_ty.is_float() {
+                if dummy_ty == types::F32 {
+                    Ok(builder.ins().f32const(0.0))
+                } else {
+                    Ok(builder.ins().f64const(0.0))
+                }
+            } else {
+                Ok(builder.ins().iconst(dummy_ty, 0))
+            }
         }
         _ => Err(format!("Expression type {:?} not yet implemented", expr)),
     }

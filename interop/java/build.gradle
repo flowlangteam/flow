@@ -41,6 +41,37 @@ jar {
     }
 }
 
+// Task to build the Rust JNI library
+task buildRustJni(type: Exec) {
+    group = 'build'
+    description = 'Build the Rust JNI library'
+    
+    workingDir '../../flow_c/flow_jni'
+    commandLine 'cargo', 'build', '--release'
+}
+
+// Task to build the Flow CLI
+task buildFlowCli(type: Exec) {
+    group = 'build'
+    description = 'Build the Flow CLI'
+    
+    workingDir '../../flow_c/flow_cli'
+    commandLine 'cargo', 'build', '--release'
+}
+
+// Include native library and executable in resources
+processResources {
+    dependsOn buildRustJni, buildFlowCli
+    from('../../flow_c/target/release') {
+        include 'libflow_jni.dylib', 'libflow_jni.so', 'flow_jni.dll'
+        into 'native'
+    }
+    from('../../flow_c/target/release') {
+        include 'flow', 'flow.exe'
+        into 'bin'
+    }
+}
+
 // Task to build the runtime JAR
 task buildRuntime(type: Jar) {
     group = 'build'
@@ -78,6 +109,24 @@ task runNativeExample(type: JavaExec, dependsOn: buildExamples) {
     
     classpath = sourceSets.main.output + files('build/examples')
     mainClass = 'flow.examples.NativeFlowExample'
+}
+
+// Task to run the Runtime Compile example
+task runRuntimeCompileExample(type: JavaExec, dependsOn: buildExamples) {
+    group = 'application'
+    description = 'Run the RuntimeCompileExample'
+    
+    classpath = sourceSets.main.output + files('build/examples')
+    mainClass = 'flow.examples.RuntimeCompileExample'
+}
+
+// Task to run the Java Interop example
+task runJavaInteropExample(type: JavaExec, dependsOn: buildExamples) {
+    group = 'application'
+    description = 'Run the JavaInteropExample'
+    
+    classpath = sourceSets.main.output + files('build/examples')
+    mainClass = 'flow.examples.JavaInteropExample'
 }
 
 // Default build task

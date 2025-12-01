@@ -76,7 +76,7 @@ impl Parser {
             )),
             Some(Token::Struct) => Ok(Item::Struct(self.parse_struct(is_pub, attributes)?)),
             Some(Token::Impl) => Ok(Item::Impl(self.parse_impl()?)),
-            Some(Token::Extern) => Ok(Item::ExternBlock(self.parse_extern_block()?)),
+            Some(Token::Link) => Ok(Item::ExternBlock(self.parse_extern_block()?)),
             Some(Token::Import) => Ok(Item::Import(self.parse_import()?)),
             Some(Token::Use) => Ok(Item::Use(self.parse_use_declaration()?)),
             Some(Token::Attr) => self.parse_attribute_definition(is_pub).map(Item::Attribute),
@@ -87,7 +87,7 @@ impl Parser {
                     Err(self.error("Attributes can only be applied to functions and structs"))
                 } else {
                     Err(self
-                        .error("Expected item (func, struct, impl, extern, import, use, or attr)"))
+                        .error("Expected item (func, struct, impl, link, import, use, or attr)"))
                 }
             }
         }
@@ -365,7 +365,7 @@ impl Parser {
     }
 
     fn parse_extern_block(&mut self) -> ParseResult<ExternBlock> {
-        self.expect(&Token::Extern)?;
+        self.expect(&Token::Link)?;
         let lang = self.expect_string()?;
         self.expect(&Token::LBrace)?;
 
@@ -378,6 +378,23 @@ impl Parser {
             let mut params = Vec::new();
             if !self.check(&Token::RParen) {
                 loop {
+                    // Handle optional parameter name "name: "
+                    // We need to peek ahead to see if it's "Ident Colon"
+                    let is_named_param = if let Some(Token::Ident(_)) = self.peek() {
+                        if self.pos + 1 < self.tokens.len() {
+                            matches!(self.tokens[self.pos + 1].0, Token::Colon)
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    };
+
+                    if is_named_param {
+                        self.advance(); // consume name
+                        self.advance(); // consume colon
+                    }
+
                     params.push(self.parse_type()?);
                     if !self.check(&Token::Comma) {
                         break;

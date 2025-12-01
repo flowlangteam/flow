@@ -292,6 +292,12 @@ impl JavaTranspiler {
                         .functions
                         .get(func_name)
                         .and_then(|sig| sig.return_type.clone())
+                        .or_else(|| {
+                            self.context
+                                .extern_functions
+                                .get(func_name)
+                                .and_then(|sig| sig.return_type.clone())
+                        })
                 } else {
                     None
                 }
@@ -332,6 +338,37 @@ impl JavaTranspiler {
             Expr::Block(exprs) => exprs
                 .last()
                 .and_then(|expr| self.infer_expr_type(expr, locals)),
+            Expr::Pipe { left: _, right } => match right.as_ref() {
+                Expr::Ident(func_name) => self
+                    .context
+                    .functions
+                    .get(func_name)
+                    .and_then(|sig| sig.return_type.clone())
+                    .or_else(|| {
+                        self.context
+                            .extern_functions
+                            .get(func_name)
+                            .and_then(|sig| sig.return_type.clone())
+                    }),
+                Expr::Call { func, .. } => {
+                    if let Expr::Ident(func_name) = func.as_ref() {
+                        self.context
+                            .functions
+                            .get(func_name)
+                            .and_then(|sig| sig.return_type.clone())
+                            .or_else(|| {
+                                self.context
+                                    .extern_functions
+                                    .get(func_name)
+                                    .and_then(|sig| sig.return_type.clone())
+                            })
+                    } else {
+                        None
+                    }
+                }
+                Expr::Pipe { .. } => self.infer_expr_type(right, locals),
+                _ => None,
+            },
             _ => None,
         }
     }

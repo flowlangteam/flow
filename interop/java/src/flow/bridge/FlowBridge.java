@@ -11,14 +11,55 @@ package flow.bridge;
 public class FlowBridge {
     
     static {
-        // Load native library
-        // This would be the compiled Flow runtime with JNI bindings
         try {
             System.loadLibrary("flow_jni");
         } catch (UnsatisfiedLinkError e) {
-            System.err.println("Warning: flow_jni native library not found");
-            System.err.println("Native Flow interop will not be available");
+            // Try to load from JAR
+            try {
+                loadNativeLibraryFromJar();
+            } catch (Exception ex) {
+                System.err.println("Warning: flow_jni native library not found in java.library.path or classpath");
+                System.err.println("Native Flow interop will not be available: " + ex.getMessage());
+            }
         }
+    }
+
+    private static void loadNativeLibraryFromJar() throws java.io.IOException {
+        String osName = System.getProperty("os.name").toLowerCase();
+        String osArch = System.getProperty("os.arch").toLowerCase();
+        
+        String libName = "flow_jni";
+        String extension;
+        String prefix = "lib";
+        
+        if (osName.contains("win")) {
+            extension = ".dll";
+            prefix = "";
+        } else if (osName.contains("mac")) {
+            extension = ".dylib";
+        } else {
+            extension = ".so";
+        }
+        
+        String resourcePath = "/native/" + libName + extension;
+        java.io.InputStream is = FlowBridge.class.getResourceAsStream(resourcePath);
+        
+        if (is == null) {
+            throw new java.io.FileNotFoundException("Native library not found in JAR at " + resourcePath);
+        }
+        
+        java.io.File tempFile = java.io.File.createTempFile(prefix + libName, extension);
+        tempFile.deleteOnExit();
+        
+        try (java.io.FileOutputStream os = new java.io.FileOutputStream(tempFile)) {
+            byte[] buffer = new byte[4096];
+            int read;
+            while ((read = is.read(buffer)) != -1) {
+                os.write(buffer, 0, read);
+            }
+        }
+        
+        System.load(tempFile.getAbsolutePath());
     }
     
     /**

@@ -31,8 +31,8 @@ pub enum Token {
     True,
     #[token("false")]
     False,
-    #[token("extern")]
-    Extern,
+    #[token("link")]
+    Link,
     #[token("import")]
     Import,
     #[token("from")]

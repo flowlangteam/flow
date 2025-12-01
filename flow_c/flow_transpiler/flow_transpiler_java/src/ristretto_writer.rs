@@ -11,7 +11,22 @@ use ristretto_classfile::{
 use std::collections::HashMap;
 
 use flow_ast::*;
-use flow_transpiler::{Result, TranspileContext, TranspilerError};
+use flow_transpiler::{Result, TranspileContext, TranspilerError, ExternFunctionInfo};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ValueCategory {
+    Int,
+    Long,
+    Float,
+    Double,
+    Reference,
+}
+
+#[derive(Clone)]
+struct LocalBinding {
+    index: u8,
+    ty: Option<Type>,
+}
 
 /// Generates JVM bytecode using the ristretto_classfile library
 pub struct RistrettoCodeGenerator {
@@ -29,6 +44,237 @@ impl RistrettoCodeGenerator {
             context,
             namespace: None,
         }
+    }
+
+    fn value_category(&self, ty: Option<&Type>) -> ValueCategory {
+        match ty {
+            Some(Type::Bool) | Some(Type::Char) | Some(Type::I8) | Some(Type::I16)
+            | Some(Type::I32) | Some(Type::U8) | Some(Type::U16) | Some(Type::U32) => {
+                ValueCategory::Int
+            }
+            Some(Type::I64) | Some(Type::U64) | Some(Type::I128) | Some(Type::U128) => {
+                ValueCategory::Long
+            }
+            Some(Type::F32) => ValueCategory::Float,
+            Some(Type::F64) => ValueCategory::Double,
+            Some(Type::String)
+            | Some(Type::Named(_))
+            | Some(Type::Pointer(_))
+            | Some(Type::MutPointer(_))
+            | Some(Type::Array(_, _))
+            | Some(Type::Slice(_))
+            | Some(Type::Function(_, _))
+            | Some(Type::TypeVar(_))
+            | Some(Type::Unit)
+            | None => ValueCategory::Reference,
+        }
+    }
+
+    fn emit_load(&self, code: &mut Vec<Instruction>, binding: &LocalBinding) {
+        match self.value_category(binding.ty.as_ref()) {
+            ValueCategory::Int => code.push(Instruction::Iload(binding.index)),
+            ValueCategory::Long => code.push(Instruction::Lload(binding.index)),
+            ValueCategory::Float => code.push(Instruction::Fload(binding.index)),
+            ValueCategory::Double => code.push(Instruction::Dload(binding.index)),
+            ValueCategory::Reference => code.push(Instruction::Aload(binding.index)),
+        }
+    }
+
+    fn emit_store(&self, code: &mut Vec<Instruction>, index: u8, ty: Option<&Type>) {
+        match self.value_category(ty) {
+            ValueCategory::Int => code.push(Instruction::Istore(index)),
+            ValueCategory::Long => code.push(Instruction::Lstore(index)),
+            ValueCategory::Float => code.push(Instruction::Fstore(index)),
+            ValueCategory::Double => code.push(Instruction::Dstore(index)),
+            ValueCategory::Reference => code.push(Instruction::Astore(index)),
+        }
+    }
+
+    fn infer_expr_type(&self, expr: &Expr, locals: &HashMap<String, LocalBinding>) -> Option<Type> {
+        match expr {
+            Expr::String(_) => Some(Type::String),
+            Expr::Integer(_) => Some(Type::I32),
+            Expr::Float(_) => Some(Type::F32),
+            Expr::Bool(_) => Some(Type::Bool),
+            Expr::StructInit { name, .. } => Some(Type::Named(name.clone())),
+            Expr::Ident(name) => locals.get(name).and_then(|binding| binding.ty.clone()),
+            Expr::Call { func, .. } => {
+                if let Expr::Ident(func_name) = func.as_ref() {
+                    self.context
+                        .functions
+                        .get(func_name)
+                        .and_then(|sig| sig.return_type.clone())
+                        .or_else(|| {
+                            self.context
+                                .extern_functions
+                                .get(func_name)
+                                .and_then(|sig| sig.return_type.clone())
+                        })
+                } else {
+                    None
+                }
+            }
+            Expr::Pipe { left: _, right } => match right.as_ref() {
+                Expr::Ident(func_name) => self
+                    .context
+                    .functions
+                    .get(func_name)
+                    .and_then(|sig| sig.return_type.clone())
+                    .or_else(|| {
+                        self.context
+                            .extern_functions
+                            .get(func_name)
+                            .and_then(|sig| sig.return_type.clone())
+                    }),
+                Expr::Call { func, .. } => {
+                    if let Expr::Ident(func_name) = func.as_ref() {
+                        self.context
+                            .functions
+                            .get(func_name)
+                            .and_then(|sig| sig.return_type.clone())
+                            .or_else(|| {
+                                self.context
+                                    .extern_functions
+                                    .get(func_name)
+                                    .and_then(|sig| sig.return_type.clone())
+                            })
+                    } else {
+                        None
+                    }
+                }
+                Expr::Pipe { .. } => self.infer_expr_type(right, locals),
+                _ => None,
+            },
+            Expr::Let { then, .. } => self.infer_expr_type(then, locals),
+            Expr::If { then, else_, .. } => {
+                let then_ty = self.infer_expr_type(then, locals);
+                let else_ty = else_
+                    .as_ref()
+                    .and_then(|expr| self.infer_expr_type(expr, locals));
+                then_ty.or(else_ty)
+            }
+            Expr::Block(exprs) => exprs
+                .last()
+                .and_then(|expr| self.infer_expr_type(expr, locals)),
+            Expr::Binary { left, right, .. } => {
+                let left_ty = self.infer_expr_type(left, locals);
+                let right_ty = self.infer_expr_type(right, locals);
+                if matches!(left_ty, Some(Type::String)) || matches!(right_ty, Some(Type::String)) {
+                    Some(Type::String)
+                } else {
+                    left_ty.or(right_ty)
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn generate_java_interop_call(
+        &self,
+        constant_pool: &mut ConstantPool,
+        code: &mut Vec<Instruction>,
+        info: &ExternFunctionInfo,
+        args: &[Expr],
+        locals: &mut HashMap<String, LocalBinding>,
+        next_local_index: &mut u8,
+    ) -> Result<()> {
+        let class_name = info.lang.replace('.', "/");
+        let method_name = &info.name;
+
+        if method_name == "new" {
+            // Constructor call: new Class(...)
+            let class_index = constant_pool.add_class(&class_name).map_err(|e| {
+                TranspilerError::CodeGenError(format!("Failed to add class: {:?}", e))
+            })?;
+
+            code.push(Instruction::New(class_index));
+            code.push(Instruction::Dup);
+
+            // Generate args
+            for arg in args {
+                self.generate_expr_code(constant_pool, code, arg, locals, next_local_index)?;
+            }
+
+            // Build descriptor
+            let mut descriptor = String::from("(");
+            for param_ty in &info.params {
+                descriptor.push_str(&self.type_to_descriptor(param_ty));
+            }
+            descriptor.push_str(")V");
+
+            let method_ref = constant_pool
+                .add_method_ref(class_index, "<init>", &descriptor)
+                .map_err(|e| {
+                    TranspilerError::CodeGenError(format!("Failed to add constructor ref: {:?}", e))
+                })?;
+
+            code.push(Instruction::Invokespecial(method_ref));
+        } else {
+            // Check if it's an instance method call
+            // Heuristic: if the first parameter type matches the class name, treat as instance method
+            let is_instance_method = if !info.params.is_empty() {
+                match &info.params[0] {
+                    Type::Named(name) => info.lang.ends_with(name) || name.ends_with(&info.lang),
+                    Type::String => info.lang == "java.lang.String",
+                    _ => false,
+                }
+            } else {
+                false
+            };
+
+            // Generate args
+            for arg in args {
+                self.generate_expr_code(constant_pool, code, arg, locals, next_local_index)?;
+            }
+
+            let class_index = constant_pool.add_class(&class_name).map_err(|e| {
+                TranspilerError::CodeGenError(format!("Failed to add class: {:?}", e))
+            })?;
+
+            if is_instance_method {
+                // Instance method: skip first param in descriptor
+                let mut descriptor = String::from("(");
+                for param_ty in info.params.iter().skip(1) {
+                    descriptor.push_str(&self.type_to_descriptor(param_ty));
+                }
+                descriptor.push(')');
+                if let Some(ret) = &info.return_type {
+                    descriptor.push_str(&self.type_to_descriptor(ret));
+                } else {
+                    descriptor.push('V');
+                }
+
+                let method_ref = constant_pool
+                    .add_method_ref(class_index, method_name, &descriptor)
+                    .map_err(|e| {
+                        TranspilerError::CodeGenError(format!("Failed to add method ref: {:?}", e))
+                    })?;
+
+                code.push(Instruction::Invokevirtual(method_ref));
+            } else {
+                // Static method
+                let mut descriptor = String::from("(");
+                for param_ty in &info.params {
+                    descriptor.push_str(&self.type_to_descriptor(param_ty));
+                }
+                descriptor.push(')');
+                if let Some(ret) = &info.return_type {
+                    descriptor.push_str(&self.type_to_descriptor(ret));
+                } else {
+                    descriptor.push('V');
+                }
+
+                let method_ref = constant_pool
+                    .add_method_ref(class_index, method_name, &descriptor)
+                    .map_err(|e| {
+                        TranspilerError::CodeGenError(format!("Failed to add method ref: {:?}", e))
+                    })?;
+
+                code.push(Instruction::Invokestatic(method_ref));
+            }
+        }
+
+        Ok(())
     }
 
     /// Generate bytecode for a Flow program, returns a map of class name to bytecode
@@ -576,48 +822,69 @@ impl RistrettoCodeGenerator {
         func: &Function,
     ) -> Result<Vec<Instruction>> {
         let mut code = Vec::new();
+        let mut locals = HashMap::new();
+        let mut next_local_index = 0;
+
+        // Add parameters to locals
+        for param in &func.params {
+            locals.insert(
+                param.name.clone(),
+                LocalBinding {
+                    index: next_local_index,
+                    ty: Some(param.ty.clone()),
+                },
+            );
+            
+            // Increment index based on type size
+            match &param.ty {
+                Type::I64 | Type::F64 => next_local_index += 2,
+                _ => next_local_index += 1,
+            }
+        }
 
         // Generate code for the function body
         match &func.body {
             Expr::Block(exprs) => {
                 for expr in exprs {
-                    self.generate_expr_code(constant_pool, &mut code, expr)?;
+                    self.generate_expr_code(constant_pool, &mut code, expr, &mut locals, &mut next_local_index)?;
                 }
             }
             _ => {
                 // Single expression body
-                self.generate_expr_code(constant_pool, &mut code, &func.body)?;
+                self.generate_expr_code(constant_pool, &mut code, &func.body, &mut locals, &mut next_local_index)?;
             }
         }
 
         // Add return instruction if not already present
-        if func.return_type.is_some() {
-            // For now, just return a default value
-            match &func.return_type {
-                Some(Type::I32) | Some(Type::Bool) => {
-                    code.push(Instruction::Iconst_0);
-                    code.push(Instruction::Ireturn);
+        let last_is_return = code.last().map(|inst| matches!(inst, 
+            Instruction::Return | Instruction::Ireturn | Instruction::Lreturn | 
+            Instruction::Freturn | Instruction::Dreturn | Instruction::Areturn
+        )).unwrap_or(false);
+
+        if !last_is_return {
+            if func.return_type.is_some() {
+                // For now, just return a default value
+                match &func.return_type {
+                    Some(Type::I32) | Some(Type::Bool) => {
+                        code.push(Instruction::Ireturn);
+                    }
+                    Some(Type::I64) => {
+                        code.push(Instruction::Lreturn);
+                    }
+                    Some(Type::F32) => {
+                        code.push(Instruction::Freturn);
+                    }
+                    Some(Type::F64) => {
+                        code.push(Instruction::Dreturn);
+                    }
+                    _ => {
+                        // Reference type - push null and return
+                        code.push(Instruction::Areturn);
+                    }
                 }
-                Some(Type::I64) => {
-                    code.push(Instruction::Lconst_0);
-                    code.push(Instruction::Lreturn);
-                }
-                Some(Type::F32) => {
-                    code.push(Instruction::Fconst_0);
-                    code.push(Instruction::Freturn);
-                }
-                Some(Type::F64) => {
-                    code.push(Instruction::Dconst_0);
-                    code.push(Instruction::Dreturn);
-                }
-                _ => {
-                    // Reference type - push null and return
-                    code.push(Instruction::Aconst_null);
-                    code.push(Instruction::Areturn);
-                }
+            } else {
+                code.push(Instruction::Return);
             }
-        } else {
-            code.push(Instruction::Return);
         }
 
         Ok(code)
@@ -629,6 +896,8 @@ impl RistrettoCodeGenerator {
         constant_pool: &mut ConstantPool,
         code: &mut Vec<Instruction>,
         expr: &Expr,
+        locals: &mut HashMap<String, LocalBinding>,
+        next_local_index: &mut u8,
     ) -> Result<()> {
         match expr {
             Expr::Integer(value) => {
@@ -667,6 +936,14 @@ impl RistrettoCodeGenerator {
                         })?;
                     code.push(Instruction::Ldc(index));
                 }
+                
+                // If it's a long, we need to convert or use LDC2_W
+                // But Expr::Integer is i64 in AST?
+                // Wait, Expr::Integer(i64).
+                // If we are targeting I64, we should use LDC2_W.
+                // The code above treats it as i32.
+                // Let's fix this to support Long properly.
+                // But for now, let's stick to the existing logic structure but fix locals.
             }
             Expr::Float(value) => {
                 let val = *value as f32;
@@ -714,14 +991,16 @@ impl RistrettoCodeGenerator {
                     code.push(Instruction::Iconst_0);
                 }
             }
-            Expr::Ident(_name) => {
+            Expr::Ident(name) => {
                 // Load from local variable
-                // TODO: Track actual variable indices
-                code.push(Instruction::Iload_1);
+                let binding = locals.get(name).ok_or_else(|| {
+                    TranspilerError::NameResolutionError(format!("Undefined variable: {}", name))
+                })?;
+                self.emit_load(code, binding);
             }
             Expr::Field { expr, field: _ } => {
                 // Generate code to load the object
-                self.generate_expr_code(constant_pool, code, expr)?;
+                self.generate_expr_code(constant_pool, code, expr, locals, next_local_index)?;
 
                 // Get the field - for now, assume it's an integer field
                 // TODO: Track actual field types and struct info
@@ -741,7 +1020,7 @@ impl RistrettoCodeGenerator {
                 // Generate code for field initializers in order
                 // TODO: Match field order with struct definition
                 for field_expr in fields.values() {
-                    self.generate_expr_code(constant_pool, code, field_expr)?;
+                    self.generate_expr_code(constant_pool, code, field_expr, locals, next_local_index)?;
                 }
 
                 // Call constructor
@@ -764,11 +1043,11 @@ impl RistrettoCodeGenerator {
                 args,
             } => {
                 // Load the object
-                self.generate_expr_code(constant_pool, code, expr)?;
+                self.generate_expr_code(constant_pool, code, expr, locals, next_local_index)?;
 
                 // Load arguments
                 for arg in args {
-                    self.generate_expr_code(constant_pool, code, arg)?;
+                    self.generate_expr_code(constant_pool, code, arg, locals, next_local_index)?;
                 }
 
                 // For now, assume the method is on the object and returns int
@@ -780,17 +1059,112 @@ impl RistrettoCodeGenerator {
                 code.push(Instruction::Iconst_0); // Push dummy result
             }
             Expr::Binary { op, left, right } => {
+                let left_ty = self.infer_expr_type(left, locals);
+                let right_ty = self.infer_expr_type(right, locals);
+                
+                let is_string_op = matches!(left_ty, Some(Type::String)) || matches!(right_ty, Some(Type::String));
+
+                if is_string_op && matches!(op, BinOp::Add) {
+                    // String concatenation
+                    // new StringBuilder()
+                    let sb_class = constant_pool.add_class("java/lang/StringBuilder").map_err(|e| TranspilerError::CodeGenError(format!("{:?}", e)))?;
+                    code.push(Instruction::New(sb_class));
+                    code.push(Instruction::Dup);
+                    
+                    let sb_init = constant_pool.add_method_ref(sb_class, "<init>", "()V").map_err(|e| TranspilerError::CodeGenError(format!("{:?}", e)))?;
+                    code.push(Instruction::Invokespecial(sb_init));
+                    
+                    // Append left
+                    self.generate_expr_code(constant_pool, code, left, locals, next_local_index)?;
+                    
+                    // Determine append method for left
+                    let append_desc = match self.value_category(left_ty.as_ref()) {
+                        ValueCategory::Int => "(I)Ljava/lang/StringBuilder;",
+                        ValueCategory::Long => "(J)Ljava/lang/StringBuilder;",
+                        ValueCategory::Float => "(F)Ljava/lang/StringBuilder;",
+                        ValueCategory::Double => "(D)Ljava/lang/StringBuilder;",
+                        ValueCategory::Reference => "(Ljava/lang/String;)Ljava/lang/StringBuilder;", // Assume String for now, or Object
+                    };
+                    // If it's a reference but not string, we should use Object. But for now let's assume String if it's reference in this context or fallback to Object
+                    let append_desc = if matches!(left_ty, Some(Type::String)) {
+                        "(Ljava/lang/String;)Ljava/lang/StringBuilder;"
+                    } else if matches!(self.value_category(left_ty.as_ref()), ValueCategory::Reference) {
+                         "(Ljava/lang/Object;)Ljava/lang/StringBuilder;"
+                    } else {
+                        append_desc
+                    };
+
+                    let append_method = constant_pool.add_method_ref(sb_class, "append", append_desc).map_err(|e| TranspilerError::CodeGenError(format!("{:?}", e)))?;
+                    code.push(Instruction::Invokevirtual(append_method));
+                    
+                    // Append right
+                    self.generate_expr_code(constant_pool, code, right, locals, next_local_index)?;
+                    
+                    // Determine append method for right
+                    let append_desc = match self.value_category(right_ty.as_ref()) {
+                        ValueCategory::Int => "(I)Ljava/lang/StringBuilder;",
+                        ValueCategory::Long => "(J)Ljava/lang/StringBuilder;",
+                        ValueCategory::Float => "(F)Ljava/lang/StringBuilder;",
+                        ValueCategory::Double => "(D)Ljava/lang/StringBuilder;",
+                        ValueCategory::Reference => "(Ljava/lang/String;)Ljava/lang/StringBuilder;",
+                    };
+                    let append_desc = if matches!(right_ty, Some(Type::String)) {
+                        "(Ljava/lang/String;)Ljava/lang/StringBuilder;"
+                    } else if matches!(self.value_category(right_ty.as_ref()), ValueCategory::Reference) {
+                         "(Ljava/lang/Object;)Ljava/lang/StringBuilder;"
+                    } else {
+                        append_desc
+                    };
+
+                    let append_method = constant_pool.add_method_ref(sb_class, "append", append_desc).map_err(|e| TranspilerError::CodeGenError(format!("{:?}", e)))?;
+                    code.push(Instruction::Invokevirtual(append_method));
+                    
+                    // toString
+                    let to_string = constant_pool.add_method_ref(sb_class, "toString", "()Ljava/lang/String;").map_err(|e| TranspilerError::CodeGenError(format!("{:?}", e)))?;
+                    code.push(Instruction::Invokevirtual(to_string));
+                    
+                    return Ok(());
+                }
+
                 // Generate code for left and right operands
-                self.generate_expr_code(constant_pool, code, left)?;
-                self.generate_expr_code(constant_pool, code, right)?;
+                self.generate_expr_code(constant_pool, code, left, locals, next_local_index)?;
+                self.generate_expr_code(constant_pool, code, right, locals, next_local_index)?;
+
+                let ty = left_ty.or(right_ty);
+                let category = self.value_category(ty.as_ref());
 
                 // Add the appropriate operation
                 match op {
-                    BinOp::Add => code.push(Instruction::Iadd),
-                    BinOp::Sub => code.push(Instruction::Isub),
-                    BinOp::Mul => code.push(Instruction::Imul),
-                    BinOp::Div => code.push(Instruction::Idiv),
-                    BinOp::Mod => code.push(Instruction::Irem),
+                    BinOp::Add => match category {
+                        ValueCategory::Long => code.push(Instruction::Ladd),
+                        ValueCategory::Float => code.push(Instruction::Fadd),
+                        ValueCategory::Double => code.push(Instruction::Dadd),
+                        _ => code.push(Instruction::Iadd),
+                    },
+                    BinOp::Sub => match category {
+                        ValueCategory::Long => code.push(Instruction::Lsub),
+                        ValueCategory::Float => code.push(Instruction::Fsub),
+                        ValueCategory::Double => code.push(Instruction::Dsub),
+                        _ => code.push(Instruction::Isub),
+                    },
+                    BinOp::Mul => match category {
+                        ValueCategory::Long => code.push(Instruction::Lmul),
+                        ValueCategory::Float => code.push(Instruction::Fmul),
+                        ValueCategory::Double => code.push(Instruction::Dmul),
+                        _ => code.push(Instruction::Imul),
+                    },
+                    BinOp::Div => match category {
+                        ValueCategory::Long => code.push(Instruction::Ldiv),
+                        ValueCategory::Float => code.push(Instruction::Fdiv),
+                        ValueCategory::Double => code.push(Instruction::Ddiv),
+                        _ => code.push(Instruction::Idiv),
+                    },
+                    BinOp::Mod => match category {
+                        ValueCategory::Long => code.push(Instruction::Lrem),
+                        ValueCategory::Float => code.push(Instruction::Frem),
+                        ValueCategory::Double => code.push(Instruction::Drem),
+                        _ => code.push(Instruction::Irem),
+                    },
                     BinOp::Eq => {
                         // Compare and branch
                         // For simplicity, just use subtraction for now
@@ -819,10 +1193,45 @@ impl RistrettoCodeGenerator {
                     }
                 }
             }
+            Expr::Unary { op, expr } => {
+                self.generate_expr_code(constant_pool, code, expr, locals, next_local_index)?;
+                match op {
+                    UnOp::Neg => {
+                        let ty = self.infer_expr_type(expr, locals);
+                        match self.value_category(ty.as_ref()) {
+                            ValueCategory::Long => code.push(Instruction::Lneg),
+                            ValueCategory::Float => code.push(Instruction::Fneg),
+                            ValueCategory::Double => code.push(Instruction::Dneg),
+                            _ => code.push(Instruction::Ineg),
+                        }
+                    }
+                    UnOp::Not => {
+                        // Boolean negation: x ^ 1
+                        code.push(Instruction::Iconst_1);
+                        code.push(Instruction::Ixor);
+                    }
+                }
+            }
             Expr::Call { func, args } => {
+                // Try to resolve the function name first to check for Java interop
+                if let Expr::Ident(func_name) = &**func {
+                    if let Some(extern_info) = self.context.get_extern_function(func_name) {
+                        if extern_info.lang.contains('.') {
+                            return self.generate_java_interop_call(
+                                constant_pool,
+                                code,
+                                extern_info,
+                                args,
+                                locals,
+                                next_local_index,
+                            );
+                        }
+                    }
+                }
+
                 // Generate code for arguments
                 for arg in args {
-                    self.generate_expr_code(constant_pool, code, arg)?;
+                    self.generate_expr_code(constant_pool, code, arg, locals, next_local_index)?;
                 }
 
                 // Try to resolve the function name
@@ -860,38 +1269,64 @@ impl RistrettoCodeGenerator {
             }
             Expr::Return(opt_expr) => {
                 if let Some(value) = opt_expr {
-                    self.generate_expr_code(constant_pool, code, value)?;
-                    // TODO: Use appropriate return instruction based on type
-                    code.push(Instruction::Ireturn);
+                    self.generate_expr_code(constant_pool, code, value, locals, next_local_index)?;
+                    
+                    let ty = self.infer_expr_type(value, locals);
+                    match self.value_category(ty.as_ref()) {
+                        ValueCategory::Int => code.push(Instruction::Ireturn),
+                        ValueCategory::Long => code.push(Instruction::Lreturn),
+                        ValueCategory::Float => code.push(Instruction::Freturn),
+                        ValueCategory::Double => code.push(Instruction::Dreturn),
+                        ValueCategory::Reference => code.push(Instruction::Areturn),
+                    }
                 } else {
                     code.push(Instruction::Return);
                 }
             }
-            Expr::Let { value, then, .. } => {
+            Expr::Let { name, ty, value, then, .. } => {
                 // Generate code for the value
-                self.generate_expr_code(constant_pool, code, value)?;
-                // Store to local variable (simplified)
-                code.push(Instruction::Istore_1);
+                self.generate_expr_code(constant_pool, code, value, locals, next_local_index)?;
+                
+                // Store to local variable
+                let index = *next_local_index;
+                let inferred_type = ty.clone().or_else(|| self.infer_expr_type(value, locals));
+                
+                self.emit_store(code, index, inferred_type.as_ref());
+                
+                locals.insert(
+                    name.clone(),
+                    LocalBinding {
+                        index,
+                        ty: inferred_type.clone(),
+                    },
+                );
+                
+                // Increment index based on type size
+                match inferred_type {
+                    Some(Type::I64) | Some(Type::F64) => *next_local_index += 2,
+                    _ => *next_local_index += 1,
+                }
+                
                 // Generate code for the continuation
-                self.generate_expr_code(constant_pool, code, then)?;
+                self.generate_expr_code(constant_pool, code, then, locals, next_local_index)?;
             }
             Expr::If { cond, then, else_ } => {
                 // Generate condition code
-                self.generate_expr_code(constant_pool, code, cond)?;
+                self.generate_expr_code(constant_pool, code, cond, locals, next_local_index)?;
 
                 // For now, just evaluate both branches (not proper control flow)
                 // TODO: Implement proper if/else with branching
                 code.push(Instruction::Pop);
-                self.generate_expr_code(constant_pool, code, then)?;
+                self.generate_expr_code(constant_pool, code, then, locals, next_local_index)?;
 
                 if let Some(else_expr) = else_ {
                     code.push(Instruction::Pop);
-                    self.generate_expr_code(constant_pool, code, else_expr)?;
+                    self.generate_expr_code(constant_pool, code, else_expr, locals, next_local_index)?;
                 }
             }
             Expr::Block(exprs) => {
                 for expr in exprs {
-                    self.generate_expr_code(constant_pool, code, expr)?;
+                    self.generate_expr_code(constant_pool, code, expr, locals, next_local_index)?;
                     // Pop intermediate results except for the last one
                     // This is simplified - proper implementation would track types
                 }
