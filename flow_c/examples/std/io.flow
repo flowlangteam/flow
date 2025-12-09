@@ -6,5 +6,5 @@ pub func print_number(x: i64) -> i64 {
 
 pub func print_twice(x: i64) -> i64 {
     let doubled = x + x;
-    doubled
+    return doubled;
 }

@@ -557,10 +557,22 @@ impl Parser {
         let mut exprs = Vec::new();
 
         while !self.check(&Token::RBrace) {
-            exprs.push(self.parse_expr()?);
+            let expr = self.parse_expr()?;
+            let is_block_expr = matches!(
+                expr,
+                Expr::If { .. }
+                    | Expr::While { .. }
+                    | Expr::Match { .. }
+                    | Expr::Block(_)
+                    | Expr::TempScope { .. }
+                    | Expr::Unsafe { .. }
+            );
+            exprs.push(expr);
 
             if self.check(&Token::Semi) {
                 self.advance();
+            } else if is_block_expr {
+                continue;
             } else if !self.check(&Token::RBrace) {
                 break;
             }
@@ -667,6 +679,11 @@ impl Parser {
             };
 
             Ok(Expr::If { cond, then, else_ })
+        } else if self.check(&Token::While) {
+            self.advance();
+            let cond = Box::new(self.parse_logical_or()?);
+            let body = Box::new(self.parse_block_or_expr()?);
+            Ok(Expr::While { cond, body })
         } else if self.check(&Token::Match) {
             self.parse_match()
         } else {
@@ -1258,6 +1275,10 @@ impl Parser {
                 else_: else_
                     .as_ref()
                     .map(|expr| Box::new(self.substitute_expr(expr, mapping))),
+            },
+            Expr::While { cond, body } => Expr::While {
+                cond: Box::new(self.substitute_expr(cond, mapping)),
+                body: Box::new(self.substitute_expr(body, mapping)),
             },
             Expr::Match { expr, arms } => Expr::Match {
                 expr: Box::new(self.substitute_expr(expr, mapping)),

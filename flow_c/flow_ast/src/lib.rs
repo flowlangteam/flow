@@ -194,6 +194,11 @@ pub enum Expr {
         else_: Option<Box<Expr>>,
     },
 
+    While {
+        cond: Box<Expr>,
+        body: Box<Expr>,
+    },
+
     Match {
         expr: Box<Expr>,
         arms: Vec<MatchArm>,

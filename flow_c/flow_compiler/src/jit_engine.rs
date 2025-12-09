@@ -44,6 +44,12 @@ pub struct ModuleRegistry {
     modules: HashMap<String, ExternalModule>,
 }
 
+impl Default for ModuleRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ModuleRegistry {
     pub fn new() -> Self {
         Self {
@@ -184,6 +190,7 @@ struct CodegenState<'a, M: Module> {
 }
 
 impl<'a, M: Module> CodegenState<'a, M> {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         module: &'a mut M,
         builder_context: &'a mut FunctionBuilderContext,
@@ -1044,6 +1051,12 @@ pub struct JitEngine {
     settings: EngineSettings,
 }
 
+impl Default for JitEngine {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl JitEngine {
     pub fn new() -> Self {
         Self::new_with_settings(EngineSettings::default())
@@ -1559,6 +1572,35 @@ fn compile_expression(
             } else {
                 Ok(builder.ins().iconst(types::I8, 0))
             }
+        }
+        Expr::While { cond, body } => {
+            let header_block = builder.create_block();
+            let body_block = builder.create_block();
+            let exit_block = builder.create_block();
+
+            // Jump to header to evaluate condition
+            builder.ins().jump(header_block, &[]);
+            builder.switch_to_block(header_block);
+
+            let cond_value = compile_expression(cond, builder, variables, context, None)?;
+            let cond_bool = builder.ins().icmp_imm(IntCC::NotEqual, cond_value, 0);
+
+            builder.ins().brif(cond_bool, body_block, &[], exit_block, &[]);
+            // builder.seal_block(header_block); // Moved down
+
+            builder.switch_to_block(body_block);
+            compile_expression(body, builder, variables, context, None)?;
+
+            // Jump back to header
+            builder.ins().jump(header_block, &[]);
+            builder.seal_block(header_block); // Seal header after back-edge is added
+            builder.seal_block(body_block);
+
+            builder.switch_to_block(exit_block);
+            builder.seal_block(exit_block);
+
+            // While loops return Unit
+            Ok(builder.ins().iconst(types::I8, 0))
         }
         Expr::If { cond, then, else_ } => {
             if else_.is_none() {

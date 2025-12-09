@@ -14,6 +14,12 @@ pub struct AotCompilerWrapper {
     object_engine: ObjectEngine,
 }
 
+impl Default for AotCompilerWrapper {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AotCompilerWrapper {
     pub fn new() -> Self {
         Self {

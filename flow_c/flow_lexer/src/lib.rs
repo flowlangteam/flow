@@ -19,6 +19,8 @@ pub enum Token {
     Impl,
     #[token("for")]
     For,
+    #[token("while")]
+    While,
     #[token("if")]
     If,
     #[token("else")]

@@ -29,10 +29,8 @@ impl FlowCompiler for JavaTranspilerWrapper {
     fn compile_program(
         &mut self,
         program: &Program,
-        config: &CompilerConfig,
+        _config: &CompilerConfig,
     ) -> Result<CompilerOutput> {
-        if config.debug_info {}
-
         match self.transpiler.transpile(program) {
             Ok(bytecode) => Ok(CompilerOutput::Code(bytecode)),
             Err(e) => Err(CompilerError::TranspileError(format!(
@@ -45,10 +43,8 @@ impl FlowCompiler for JavaTranspilerWrapper {
     fn compile_module(
         &mut self,
         program: &Program,
-        config: &CompilerConfig,
+        _config: &CompilerConfig,
     ) -> Result<CompiledModule> {
-        if config.debug_info {}
-
         match self.transpiler.transpile(program) {
             Ok(bytecode) => {
                 let mut functions = HashMap::new();

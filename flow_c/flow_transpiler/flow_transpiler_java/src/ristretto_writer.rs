@@ -1,8 +1,3 @@
-//! Pure Rust JVM bytecode generator using the ristretto_classfile library
-//!
-//! This module provides a clean, library-based approach to generating
-//! JVM bytecode without any Java dependencies.
-
 use ristretto_classfile::attributes::Instruction;
 use ristretto_classfile::{
     BaseType, ClassAccessFlags, ClassFile, ConstantPool, Field as ClassField, FieldAccessFlags,
@@ -28,7 +23,7 @@ struct LocalBinding {
     ty: Option<Type>,
 }
 
-/// Generates JVM bytecode using the ristretto_classfile library
+
 pub struct RistrettoCodeGenerator {
     class_name: String,
     context: TranspileContext,
@@ -146,6 +141,7 @@ impl RistrettoCodeGenerator {
                 _ => None,
             },
             Expr::Let { then, .. } => self.infer_expr_type(then, locals),
+            Expr::While { .. } => Some(Type::Unit),
             Expr::If { then, else_, .. } => {
                 let then_ty = self.infer_expr_type(then, locals);
                 let else_ty = else_
@@ -1214,18 +1210,21 @@ impl RistrettoCodeGenerator {
             }
             Expr::Call { func, args } => {
                 // Try to resolve the function name first to check for Java interop
+                #[allow(clippy::collapsible_if)]
                 if let Expr::Ident(func_name) = &**func {
-                    if let Some(extern_info) = self.context.get_extern_function(func_name) {
-                        if extern_info.lang.contains('.') {
-                            return self.generate_java_interop_call(
-                                constant_pool,
-                                code,
-                                extern_info,
-                                args,
-                                locals,
-                                next_local_index,
-                            );
-                        }
+                    if let Some(extern_info) = self
+                        .context
+                        .get_extern_function(func_name)
+                        .filter(|info| info.lang.contains('.'))
+                    {
+                        return self.generate_java_interop_call(
+                            constant_pool,
+                            code,
+                            extern_info,
+                            args,
+                            locals,
+                            next_local_index,
+                        );
                     }
                 }
 
@@ -1323,6 +1322,15 @@ impl RistrettoCodeGenerator {
                     code.push(Instruction::Pop);
                     self.generate_expr_code(constant_pool, code, else_expr, locals, next_local_index)?;
                 }
+            }
+            Expr::While { cond, body } => {
+                // TODO: Implement proper while loop with branching
+                // For now, just evaluate condition and body once
+                self.generate_expr_code(constant_pool, code, cond, locals, next_local_index)?;
+                code.push(Instruction::Pop);
+                self.generate_expr_code(constant_pool, code, body, locals, next_local_index)?;
+                code.push(Instruction::Pop);
+                code.push(Instruction::Iconst_0); // Return Unit
             }
             Expr::Block(exprs) => {
                 for expr in exprs {
