@@ -14,7 +14,7 @@ use std::mem;
 use thiserror::Error;
 
 // External C functions for standard library
-extern "C" {
+unsafe extern "C" {
     fn putchar(c: i32) -> i32;
     fn printf(format: *const i8, ...) -> i32;
     fn malloc(size: usize) -> *mut u8;
