@@ -1,0 +1,16 @@
+// Nested for loops test
+
+func main() -> i64 {
+    let mut result = 0;
+    let mut i = 0;
+    let mut j = 0;
+    
+    // Nested for loops - should execute 5 * 3 = 15 times
+    for (i = 0; i < 5; i = i + 1) {
+        for (j = 0; j < 3; j = j + 1) {
+            result = result + 1;
+        }
+    };
+    
+    result
+}

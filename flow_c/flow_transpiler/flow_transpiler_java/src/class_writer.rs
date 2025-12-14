@@ -617,6 +617,9 @@ impl ClassWriter {
                     bytes.write_u8(NEW)?;
                     bytes.write_u16::<BigEndian>(index)?;
                 }
+                Instruction::Pop => {
+                    bytes.write_u8(POP)?;
+                }
                 Instruction::Dup => {
                     bytes.write_u8(DUP)?;
                 }

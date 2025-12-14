@@ -133,6 +133,7 @@ pub const INVOKESTATIC: u8 = 0xB8;
 pub const INVOKEINTERFACE: u8 = 0xB9;
 
 pub const NEW: u8 = 0xBB;
+pub const POP: u8 = 0x57;
 pub const DUP: u8 = 0x59;
 
 #[derive(Debug, Clone)]
@@ -242,6 +243,9 @@ pub enum Instruction {
 
     // Object creation
     New(String),
+    
+    // Stack manipulation
+    Pop,
     Dup,
 }
 
@@ -372,6 +376,7 @@ fn instruction_size(instr: &Instruction) -> usize {
         | Instruction::GetField(_, _, _)
         | Instruction::PutField(_, _, _) => 3,
         Instruction::New(_) => 3,
+        Instruction::Pop => 1,
         Instruction::Dup => 1,
         _ => 1,
     }

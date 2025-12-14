@@ -1602,6 +1602,45 @@ fn compile_expression(
             // While loops return Unit
             Ok(builder.ins().iconst(types::I8, 0))
         }
+        Expr::For { init, cond, update, body } => {
+            // Execute init expression once
+            compile_expression(init, builder, variables, context, None)?;
+
+            let header_block = builder.create_block();
+            let body_block = builder.create_block();
+            let update_block = builder.create_block();
+            let exit_block = builder.create_block();
+
+            // Jump to header to evaluate condition
+            builder.ins().jump(header_block, &[]);
+            builder.switch_to_block(header_block);
+
+            let cond_value = compile_expression(cond, builder, variables, context, None)?;
+            let cond_bool = builder.ins().icmp_imm(IntCC::NotEqual, cond_value, 0);
+
+            builder.ins().brif(cond_bool, body_block, &[], exit_block, &[]);
+
+            builder.switch_to_block(body_block);
+            compile_expression(body, builder, variables, context, None)?;
+
+            // Jump to update
+            builder.ins().jump(update_block, &[]);
+            builder.seal_block(body_block);
+
+            builder.switch_to_block(update_block);
+            compile_expression(update, builder, variables, context, None)?;
+
+            // Jump back to header
+            builder.ins().jump(header_block, &[]);
+            builder.seal_block(header_block); // Seal header after back-edge is added
+            builder.seal_block(update_block);
+
+            builder.switch_to_block(exit_block);
+            builder.seal_block(exit_block);
+
+            // For loops return Unit
+            Ok(builder.ins().iconst(types::I8, 0))
+        }
         Expr::If { cond, then, else_ } => {
             if else_.is_none() {
                 if let Some(expected) = expected_type {

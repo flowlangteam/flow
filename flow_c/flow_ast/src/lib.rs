@@ -199,6 +199,13 @@ pub enum Expr {
         body: Box<Expr>,
     },
 
+    For {
+        init: Box<Expr>,
+        cond: Box<Expr>,
+        update: Box<Expr>,
+        body: Box<Expr>,
+    },
+
     Match {
         expr: Box<Expr>,
         arms: Vec<MatchArm>,

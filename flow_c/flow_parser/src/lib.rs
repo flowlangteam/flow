@@ -562,6 +562,7 @@ impl Parser {
                 expr,
                 Expr::If { .. }
                     | Expr::While { .. }
+                    | Expr::For { .. }
                     | Expr::Match { .. }
                     | Expr::Block(_)
                     | Expr::TempScope { .. }
@@ -684,6 +685,26 @@ impl Parser {
             let cond = Box::new(self.parse_logical_or()?);
             let body = Box::new(self.parse_block_or_expr()?);
             Ok(Expr::While { cond, body })
+        } else if self.check(&Token::For) {
+            self.advance();
+            self.expect(&Token::LParen)?;
+            
+            // Parse init expression
+            let init = Box::new(self.parse_expr()?);
+            self.expect(&Token::Semi)?;
+            
+            // Parse condition expression
+            let cond = Box::new(self.parse_expr()?);
+            self.expect(&Token::Semi)?;
+            
+            // Parse update expression
+            let update = Box::new(self.parse_expr()?);
+            self.expect(&Token::RParen)?;
+            
+            // Parse body
+            let body = Box::new(self.parse_block_or_expr()?);
+            
+            Ok(Expr::For { init, cond, update, body })
         } else if self.check(&Token::Match) {
             self.parse_match()
         } else {
@@ -1278,6 +1299,12 @@ impl Parser {
             },
             Expr::While { cond, body } => Expr::While {
                 cond: Box::new(self.substitute_expr(cond, mapping)),
+                body: Box::new(self.substitute_expr(body, mapping)),
+            },
+            Expr::For { init, cond, update, body } => Expr::For {
+                init: Box::new(self.substitute_expr(init, mapping)),
+                cond: Box::new(self.substitute_expr(cond, mapping)),
+                update: Box::new(self.substitute_expr(update, mapping)),
                 body: Box::new(self.substitute_expr(body, mapping)),
             },
             Expr::Match { expr, arms } => Expr::Match {

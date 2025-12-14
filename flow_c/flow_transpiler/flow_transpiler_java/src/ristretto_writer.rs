@@ -40,6 +40,12 @@ impl RistrettoCodeGenerator {
             namespace: None,
         }
     }
+    
+    /// Calculate the absolute byte address of an instruction
+    /// The ristretto library's write_offset expects absolute addresses, not relative offsets
+    fn calculate_instruction_address(&self, _code: &[Instruction], target_idx: usize) -> u16 {
+        target_idx as u16
+    }
 
     fn value_category(&self, ty: Option<&Type>) -> ValueCategory {
         match ty {
@@ -142,6 +148,7 @@ impl RistrettoCodeGenerator {
             },
             Expr::Let { then, .. } => self.infer_expr_type(then, locals),
             Expr::While { .. } => Some(Type::Unit),
+            Expr::For { .. } => Some(Type::Unit),
             Expr::If { then, else_, .. } => {
                 let then_ty = self.infer_expr_type(then, locals);
                 let else_ty = else_
@@ -1324,13 +1331,94 @@ impl RistrettoCodeGenerator {
                 }
             }
             Expr::While { cond, body } => {
-                // TODO: Implement proper while loop with branching
-                // For now, just evaluate condition and body once
+                // While loop implementation:
+                // loop_start:
+                //   evaluate condition
+                //   ifeq loop_end
+                //   evaluate body
+                //   pop result
+                //   goto loop_start
+                // loop_end:
+                //   iconst_0 (Unit)
+                
+                let loop_start_idx = code.len();
+                
+                // Evaluate condition
                 self.generate_expr_code(constant_pool, code, cond, locals, next_local_index)?;
-                code.push(Instruction::Pop);
+                
+                // If condition is false (0), jump to end
+                code.push(Instruction::Ifeq(0)); // Placeholder offset
+                let ifeq_idx = code.len() - 1;
+                
+                // Evaluate body
                 self.generate_expr_code(constant_pool, code, body, locals, next_local_index)?;
-                code.push(Instruction::Pop);
-                code.push(Instruction::Iconst_0); // Return Unit
+                code.push(Instruction::Pop); // Discard body result
+                
+                // Jump back to loop start
+                code.push(Instruction::Goto(0)); // Placeholder
+                let goto_idx = code.len() - 1;
+                
+                // Calculate absolute byte addresses for branch targets
+                let loop_start_addr = self.calculate_instruction_address(code, loop_start_idx);
+                let loop_end_addr = self.calculate_instruction_address(code, code.len());
+                
+                // Patch instructions with absolute addresses
+                code[goto_idx] = Instruction::Goto(loop_start_addr);
+                code[ifeq_idx] = Instruction::Ifeq(loop_end_addr);
+                
+                // Push Unit value
+                code.push(Instruction::Iconst_0);
+            }
+            Expr::For { init, cond, update, body } => {
+                // For loop implementation:
+                // init expression
+                // pop init result
+                // loop_start:
+                //   evaluate condition
+                //   ifeq loop_end
+                //   evaluate body
+                //   pop body result
+                //   evaluate update
+                //   pop update result
+                //   goto loop_start
+                // loop_end:
+                //   iconst_0 (Unit)
+                
+                // Execute init
+                self.generate_expr_code(constant_pool, code, init, locals, next_local_index)?;
+                code.push(Instruction::Pop); // Discard init result
+                
+                let loop_start_idx = code.len();
+                
+                // Evaluate condition
+                self.generate_expr_code(constant_pool, code, cond, locals, next_local_index)?;
+                
+                // If condition is false (0), jump to end
+                code.push(Instruction::Ifeq(0)); // Placeholder offset
+                let ifeq_idx = code.len() - 1;
+                
+                // Evaluate body
+                self.generate_expr_code(constant_pool, code, body, locals, next_local_index)?;
+                code.push(Instruction::Pop); // Discard body result
+                
+                // Evaluate update
+                self.generate_expr_code(constant_pool, code, update, locals, next_local_index)?;
+                code.push(Instruction::Pop); // Discard update result
+                
+                // Jump back to loop start
+                code.push(Instruction::Goto(0)); // Placeholder
+                let goto_idx = code.len() - 1;
+                
+                // Calculate absolute byte addresses for branch targets
+                let loop_start_addr = self.calculate_instruction_address(code, loop_start_idx);
+                let loop_end_addr = self.calculate_instruction_address(code, code.len());
+                
+                // Patch instructions with absolute addresses
+                code[goto_idx] = Instruction::Goto(loop_start_addr);
+                code[ifeq_idx] = Instruction::Ifeq(loop_end_addr);
+                
+                // Push Unit value
+                code.push(Instruction::Iconst_0);
             }
             Expr::Block(exprs) => {
                 for expr in exprs {
