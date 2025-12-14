@@ -3,6 +3,12 @@ name = "flow_lsp"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Language Server Protocol implementation for the Flow programming language"
+keywords = ["flow", "lsp", "language-server"]
+categories = ["compilers", "development-tools"]
 
 [[bin]]
 name = "flow-lsp"

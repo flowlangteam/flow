@@ -3,7 +3,7 @@ plugins {
     id 'maven-publish'
 }
 
-group = 'flow.lang'
+group = 'com.github.flowlangteam'
 version = '0.1.0'
 
 repositories {
@@ -135,12 +135,16 @@ defaultTasks 'buildRuntime'
 publishing {
     publications {
         maven(MavenPublication) {
+            groupId = 'com.github.flowlangteam'
+            artifactId = 'flow-runtime'
+            version = version
+            
             from components.java
             
             pom {
                 name = 'Flow Runtime'
                 description = 'Runtime library for Flow language Java interop'
-                url = 'https://github.com/flow-lang/flow'
+                url = 'https://github.com/flowlangteam/flow'
                 
                 licenses {
                     license {
@@ -148,6 +152,23 @@ publishing {
                         url = 'https://opensource.org/licenses/MIT'
                     }
                 }
+                
+                scm {
+                    connection = 'scm:git:git://github.com/flowlangteam/flow.git'
+                    developerConnection = 'scm:git:ssh://github.com/flowlangteam/flow.git'
+                    url = 'https://github.com/flowlangteam/flow'
+                }
+            }
+        }
+    }
+    
+    repositories {
+        maven {
+            name = 'GitHubPackages'
+            url = uri('https://maven.pkg.github.com/flowlangteam/flow')
+            credentials {
+                username = project.findProperty('gpr.user') ?: System.getenv('USERNAME')
+                password = project.findProperty('gpr.token') ?: System.getenv('TOKEN')
             }
         }
     }

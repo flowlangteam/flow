@@ -2,6 +2,13 @@
 name = "flow_lexer"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Lexical analyzer for the Flow programming language"
+keywords = ["flow", "lexer", "tokenizer"]
+categories = ["compilers", "development-tools"]
 
 [dependencies]
 logos.workspace = true

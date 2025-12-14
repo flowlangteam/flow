@@ -2,5 +2,12 @@
 name = "flow_stdlib"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Standard library for the Flow programming language"
+keywords = ["flow", "stdlib", "standard-library"]
+categories = ["compilers", "development-tools"]
 
 [dependencies]

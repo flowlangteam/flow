@@ -1,0 +1,13 @@
+jdk:
+  - openjdk17
+
+before_install:
+  - cd interop/java
+  - chmod +x build.sh
+
+install:
+  - ./build.sh || gradle build -x test
+
+# Disable the default JitPack build
+env:
+  - JITPACK=true

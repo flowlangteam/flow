@@ -1,7 +1,14 @@
 [package]
 name = "flow_jni"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "JNI bindings for the Flow programming language runtime"
+keywords = ["flow", "jni", "java"]
+categories = ["compilers", "development-tools", "api-bindings"]
 
 [lib]
 crate-type = ["cdylib"]

@@ -2,6 +2,13 @@
 name = "flow_parser"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Parser for the Flow programming language"
+keywords = ["flow", "parser", "compiler"]
+categories = ["compilers", "development-tools"]
 
 [dependencies]
 flow_ast = { path = "../flow_ast" }

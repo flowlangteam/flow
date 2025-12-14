@@ -2,6 +2,13 @@
 name = "flow_transpiler_java"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Java bytecode transpiler for the Flow programming language"
+keywords = ["flow", "transpiler", "java", "jvm"]
+categories = ["compilers", "development-tools"]
 
 [[example]]
 name = "generate_bytecode"
