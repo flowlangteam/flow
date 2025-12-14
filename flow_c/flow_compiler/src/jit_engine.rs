@@ -1200,11 +1200,10 @@ impl JitEngine {
         let mut candidates = Vec::new();
         candidates.push(name.to_string());
 
-        if !name.contains("::") {
-            if let Some(namespace) = &self.current_namespace {
+        if !name.contains("::")
+            && let Some(namespace) = &self.current_namespace {
                 candidates.push(format!("{}::{}", namespace, name));
             }
-        }
 
         for candidate in candidates {
             if let Some(func_id) = self.function_ids.get(&candidate) {
@@ -1251,11 +1250,10 @@ fn type_to_cranelift(
         flow_ast::Type::String => Ok(pointer_type),
         flow_ast::Type::Unit => Err("Unit type cannot be used as parameter".to_string()),
         flow_ast::Type::Named(name) => {
-            if let Some(layouts) = struct_layouts {
-                if !layouts.contains_key(name) {
+            if let Some(layouts) = struct_layouts
+                && !layouts.contains_key(name) {
                     return Err(format!("Struct type '{}' has no computed layout", name));
                 }
-            }
             Ok(pointer_type)
         }
         flow_ast::Type::Function(_, _) => Ok(pointer_type),
@@ -1642,13 +1640,11 @@ fn compile_expression(
             Ok(builder.ins().iconst(types::I8, 0))
         }
         Expr::If { cond, then, else_ } => {
-            if else_.is_none() {
-                if let Some(expected) = expected_type {
-                    if !matches!(expected, flow_ast::Type::Unit) {
+            if else_.is_none()
+                && let Some(expected) = expected_type
+                    && !matches!(expected, flow_ast::Type::Unit) {
                         return Err("If expression without else cannot produce a value".to_string());
                     }
-                }
-            }
 
             let cond_value = compile_expression(cond, builder, variables, context, None)?;
             let cond_bool = builder.ins().icmp_imm(IntCC::NotEqual, cond_value, 0);

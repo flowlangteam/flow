@@ -48,14 +48,14 @@ impl Compiler {
 unsafe impl Send for Compiler {}
 
 /// Initialize the Flow runtime
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_flow_bridge_FlowBridge_initializeRuntime(_env: JNIEnv, _class: JClass) {
     // Runtime initialization if needed
     println!("Flow JNI Runtime initialized");
 }
 
 /// Compile Flow source code to native code via JIT
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_flow_bridge_FlowBridge_compileFlow(
     mut env: JNIEnv,
     _class: JClass,
@@ -143,7 +143,7 @@ pub extern "system" fn Java_flow_bridge_FlowBridge_compileFlow(
 }
 
 /// Call a native Flow function by name
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_flow_bridge_FlowBridge_callNativeFunction(
     mut env: JNIEnv,
     _class: JClass,
@@ -216,7 +216,7 @@ pub extern "system" fn Java_flow_bridge_FlowBridge_callNativeFunction(
 }
 
 /// Get list of functions in a compiled module
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_flow_bridge_FlowBridge_getFunctions(
     mut env: JNIEnv,
     _class: JClass,
@@ -250,7 +250,7 @@ pub extern "system" fn Java_flow_bridge_FlowBridge_getFunctions(
 }
 
 /// Unload a compiled module
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_flow_bridge_FlowBridge_unloadModule(
     _env: JNIEnv,
     _class: JClass,
@@ -261,7 +261,7 @@ pub extern "system" fn Java_flow_bridge_FlowBridge_unloadModule(
 }
 
 /// Shutdown the Flow runtime
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "system" fn Java_flow_bridge_FlowBridge_shutdownRuntime(_env: JNIEnv, _class: JClass) {
     let mut cache = MODULE_CACHE.lock().unwrap();
     cache.clear();
