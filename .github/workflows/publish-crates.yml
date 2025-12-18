@@ -37,6 +37,7 @@ jobs:
           key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Verify version matches tag
+        if: github.event_name == 'release'
         run: |
           TAG_VERSION=${GITHUB_REF#refs/tags/v}
           CARGO_VERSION=$(grep -m 1 '^version = ' flow_c/Cargo.toml | cut -d '"' -f 2)
