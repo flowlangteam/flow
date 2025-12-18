@@ -1,7 +1,8 @@
 # Flow
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Build Status](https://github.com/flowlangteam/flow/workflows/CI/badge.svg)](https://github.com/flowlangteam/flow/actions)
+[![Publish to Crates.io](https://github.com/flowlangteam/flow/actions/workflows/publish-crates.yml/badge.svg)](https://github.com/flowlangteam/flow/actions/workflows/publish-crates.yml)
+[![Build Flow](https://github.com/flowlangteam/flow/actions/workflows/build.yml/badge.svg)](https://github.com/flowlangteam/flow/actions/workflows/build.yml)
 [![Rust Version](https://img.shields.io/badge/rust-stable-blue.svg)](https://www.rust-lang.org)
 
 A programming language with JIT compilation, transpilation, and a language server.
