@@ -23,8 +23,8 @@ name = "run_bytecode"
 path = "examples/run_bytecode.rs"
 
 [dependencies]
-flow_ast = { path = "../../flow_ast" }
-flow_transpiler = { path = ".." }
+flow_ast = { version = "0.1.0", path = "../../flow_ast" }
+flow_transpiler = { version = "0.1.0", path = ".." }
 anyhow = "1.0"
 thiserror = "1.0"
 byteorder = "1.5"
@@ -32,5 +32,5 @@ zip = { version = "0.6", default-features = false, features = ["deflate"] }
 ristretto_classfile = "0.26"
 
 [dev-dependencies]
-flow_parser = { path = "../../flow_parser" }
-flow_lexer = { path = "../../flow_lexer" }
+flow_parser = { version = "0.1.0", path = "../../flow_parser" }
+flow_lexer = { version = "0.1.0", path = "../../flow_lexer" }

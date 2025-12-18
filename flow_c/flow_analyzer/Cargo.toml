@@ -11,5 +11,5 @@ keywords = ["flow", "analyzer", "type-checker"]
 categories = ["compilers", "development-tools"]
 
 [dependencies]
-flow_ast = { path = "../flow_ast" }
-flow_parser = { path = "../flow_parser" }
+flow_ast = { version = "0.1.0", path = "../flow_ast" }
+flow_parser = { version = "0.1.0", path = "../flow_parser" }

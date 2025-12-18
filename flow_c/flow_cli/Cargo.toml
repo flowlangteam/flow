@@ -15,14 +15,14 @@ name = "flow"
 path = "src/main.rs"
 
 [dependencies]
-flow_ast = { path = "../flow_ast" }
-flow_lexer = { path = "../flow_lexer" }
-flow_parser = { path = "../flow_parser" }
-flow_analyzer = { path = "../flow_analyzer" }
-flow_compiler = { path = "../flow_compiler" }
-flow_runtime = { path = "../flow_runtime" }
-flow_transpiler = { path = "../flow_transpiler" }
-flow_transpiler_java = { path = "../flow_transpiler/flow_transpiler_java" }
+flow_ast = { version = "0.1.0", path = "../flow_ast" }
+flow_lexer = { version = "0.1.0", path = "../flow_lexer" }
+flow_parser = { version = "0.1.0", path = "../flow_parser" }
+flow_analyzer = { version = "0.1.0", path = "../flow_analyzer" }
+flow_compiler = { version = "0.1.0", path = "../flow_compiler" }
+flow_runtime = { version = "0.1.0", path = "../flow_runtime" }
+flow_transpiler = { version = "0.1.0", path = "../flow_transpiler" }
+flow_transpiler_java = { version = "0.1.0", path = "../flow_transpiler/flow_transpiler_java" }
 clap.workspace = true
 ariadne.workspace = true
 codespan-reporting.workspace = true
