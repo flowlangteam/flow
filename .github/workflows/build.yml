@@ -51,7 +51,7 @@ jobs:
 
     - name: Build Flow CLI
       working-directory: flow_c
-      run: cargo build --release -p flow_cli
+      run: cargo build --release -p flow_c
 
     - name: Run Tests
       working-directory: flow_c

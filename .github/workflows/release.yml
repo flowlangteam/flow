@@ -81,7 +81,7 @@ jobs:
 
     - name: Build Flow CLI
       working-directory: flow_c
-      run: cargo build --release -p flow_cli
+      run: cargo build --release -p flow_c
 
     - name: Build JNI Library
       working-directory: flow_c

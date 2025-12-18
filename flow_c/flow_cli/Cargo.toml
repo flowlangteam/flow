@@ -1,5 +1,5 @@
 [package]
-name = "flow_cli"
+name = "flow_c"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

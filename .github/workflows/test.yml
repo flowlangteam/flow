@@ -92,7 +92,7 @@ jobs:
 
     - name: Build CLI
       working-directory: flow_c
-      run: cargo build --release -p flow_cli
+      run: cargo build --release -p flow_c
 
     - name: Test transpilation
       run: |
@@ -173,7 +173,7 @@ jobs:
 
     - name: Build CLI
       working-directory: flow_c
-      run: cargo build --release -p flow_cli
+      run: cargo build --release -p flow_c
 
     - name: Test examples compile
       working-directory: flow_c
