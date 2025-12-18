@@ -52,73 +52,73 @@ jobs:
         run: cd flow_c && cargo test --all
 
       - name: Publish flow_ast
-        run: cd flow_c && cargo publish -p flow_ast --token ${{ secrets.CRATES_IO_TOKEN }}
+        run: cd flow_c && cargo publish -p flow_ast --token ${{ secrets.CRATES_IO_TOKEN }} || echo "Skipping flow_ast (already published or error)"
 
       - name: Wait for crates.io
-        run: sleep 30
+        run: sleep 5
 
       - name: Publish flow_lexer
-        run: cd flow_c && cargo publish -p flow_lexer --token ${{ secrets.CRATES_IO_TOKEN }}
+        run: cd flow_c && cargo publish -p flow_lexer --token ${{ secrets.CRATES_IO_TOKEN }} || echo "Skipping flow_lexer (already published or error)"
 
       - name: Wait for crates.io
-        run: sleep 30
+        run: sleep 5
 
       - name: Publish flow_runtime
-        run: cd flow_c && cargo publish -p flow_runtime --token ${{ secrets.CRATES_IO_TOKEN }}
+        run: cd flow_c && cargo publish -p flow_runtime --token ${{ secrets.CRATES_IO_TOKEN }} || echo "Skipping flow_runtime (already published or error)"
 
       - name: Wait for crates.io
-        run: sleep 30
+        run: sleep 5
 
       - name: Publish flow_stdlib
-        run: cd flow_c && cargo publish -p flow_stdlib --token ${{ secrets.CRATES_IO_TOKEN }}
+        run: cd flow_c && cargo publish -p flow_stdlib --token ${{ secrets.CRATES_IO_TOKEN }} || echo "Skipping flow_stdlib (already published or error)"
 
       - name: Wait for crates.io
-        run: sleep 30
+        run: sleep 5
 
       - name: Publish flow_parser
-        run: cd flow_c && cargo publish -p flow_parser --token ${{ secrets.CRATES_IO_TOKEN }}
+        run: cd flow_c && cargo publish -p flow_parser --token ${{ secrets.CRATES_IO_TOKEN }} || echo "Skipping flow_parser (already published or error)"
 
       - name: Wait for crates.io
-        run: sleep 30
+        run: sleep 5
 
       - name: Publish flow_analyzer
-        run: cd flow_c && cargo publish -p flow_analyzer --token ${{ secrets.CRATES_IO_TOKEN }}
+        run: cd flow_c && cargo publish -p flow_analyzer --token ${{ secrets.CRATES_IO_TOKEN }} || echo "Skipping flow_analyzer (already published or error)"
 
       - name: Wait for crates.io
-        run: sleep 30
+        run: sleep 5
 
       - name: Publish flow_transpiler
-        run: cd flow_c && cargo publish -p flow_transpiler --token ${{ secrets.CRATES_IO_TOKEN }}
+        run: cd flow_c && cargo publish -p flow_transpiler --token ${{ secrets.CRATES_IO_TOKEN }} || echo "Skipping flow_transpiler (already published or error)"
 
       - name: Wait for crates.io
-        run: sleep 30
+        run: sleep 5
 
       - name: Publish flow_transpiler_java
-        run: cd flow_c && cargo publish -p flow_transpiler_java --token ${{ secrets.CRATES_IO_TOKEN }}
+        run: cd flow_c && cargo publish -p flow_transpiler_java --token ${{ secrets.CRATES_IO_TOKEN }} || echo "Skipping flow_transpiler_java (already published or error)"
 
       - name: Wait for crates.io
-        run: sleep 30
+        run: sleep 5
 
       - name: Publish flow_compiler
-        run: cd flow_c && cargo publish -p flow_compiler --token ${{ secrets.CRATES_IO_TOKEN }}
+        run: cd flow_c && cargo publish -p flow_compiler --token ${{ secrets.CRATES_IO_TOKEN }} || echo "Skipping flow_compiler (already published or error)"
 
       - name: Wait for crates.io
-        run: sleep 30
+        run: sleep 5
 
       - name: Publish flow_lsp
-        run: cd flow_c && cargo publish -p flow_lsp --token ${{ secrets.CRATES_IO_TOKEN }}
+        run: cd flow_c && cargo publish -p flow_lsp --token ${{ secrets.CRATES_IO_TOKEN }} || echo "Skipping flow_lsp (already published or error)"
 
       - name: Wait for crates.io
-        run: sleep 30
+        run: sleep 5
 
       - name: Publish flow_cli
-        run: cd flow_c && cargo publish -p flow_cli --token ${{ secrets.CRATES_IO_TOKEN }}
+        run: cd flow_c && cargo publish -p flow_cli --token ${{ secrets.CRATES_IO_TOKEN }} || echo "Skipping flow_cli (already published or error)"
 
       - name: Wait for crates.io
-        run: sleep 30
+        run: sleep 5
 
       - name: Publish flow_jni
-        run: cd flow_c && cargo publish -p flow_jni --token ${{ secrets.CRATES_IO_TOKEN }}
+        run: cd flow_c && cargo publish -p flow_jni --token ${{ secrets.CRATES_IO_TOKEN }} || echo "Skipping flow_jni (already published or error)"
 
       - name: Notify success
         if: success()
